@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "createdAt": "2026-09-02T21:48:07.827Z",
+  "strategy": "compose-multiplatform",
+  "sourceProject": "game-usinagem-1788385659680",
+  "analysis": {
+    "projectName": "game-usinagem-1788385659680",
+    "root": "C:\\Users\\PC-NOVO\\Documents\\Droid2iOS-Workspaces\\game-usinagem-1788385659680",
+    "languages": {
+      ".gitignore": 1,
+      ".kts": 3,
+      ".pro": 1,
+      ".json": 3,
+      ".xml": 16,
+      ".kt": 114,
+      ".wav": 3,
+      ".md": 12,
+      ".rules": 2,
+      ".properties": 3,
+      ".jar": 1,
+      "gradlew": 1,
+      ".bat": 1
+    },
+    "signals": [
+      "Jetpack Compose"
+    ],
+    "androidSignals": [
+      "Android Gradle Plugin",
+      "Jetpack Compose",
+      "Room",
+      "Hilt",
+      "WorkManager",
+      "Firebase",
+      "DataStore"
+    ],
+    "iosBlockers": [
+      "Room requer camada multiplataforma ou implementação iOS",
+      "Hilt é Android/JVM; migrar DI para Koin/manual/common",
+      "WorkManager precisa de equivalente iOS",
+      "Firebase precisa de configuração/SDK iOS",
+      "DataStore precisa ser isolado/substituído para iOS",
+      "APIs android.* precisam ser isoladas de commonMain"
+    ],
+    "migrationScore": 52,
+    "recommendedStrategy": "compose-multiplatform",
+    "filesScanned": 161
+  }
+}

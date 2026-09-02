@@ -1,0 +1,21 @@
+name: UsinagemConverted
+options:
+  bundleIdPrefix: dev.droid2ios
+targets:
+  UsinagemConverted:
+    type: application
+    platform: iOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: UsinagemConverted
+    dependencies:
+      - framework: ../ios-converted/composeApp/build/bin/iosArm64/debugFramework/Shared.framework
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.droid2ios.converted
+        SWIFT_VERSION: 5.0
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+        INFOPLIST_FILE: UsinagemConverted/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
