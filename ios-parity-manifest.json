@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "sourceOfTruth": "Android atual do repositório + README do Usinagem Master",
+  "systems": [
+    {
+      "id": "dashboard",
+      "label": "Dashboard",
+      "tokens": [
+        "DashboardStatus",
+        "Produção",
+        "Contratos"
+      ]
+    },
+    {
+      "id": "factory",
+      "label": "Fábrica Viva",
+      "tokens": [
+        "Fábrica",
+        "máquina",
+        "operador"
+      ]
+    },
+    {
+      "id": "machines",
+      "label": "Máquinas",
+      "tokens": [
+        "Machine",
+        "condition",
+        "operating"
+      ]
+    },
+    {
+      "id": "employees",
+      "label": "Funcionários",
+      "tokens": [
+        "Employee",
+        "exaust",
+        "descanso"
+      ]
+    },
+    {
+      "id": "contracts",
+      "label": "Contratos",
+      "tokens": [
+        "Contract",
+        "reward",
+        "penalty"
+      ]
+    },
+    {
+      "id": "production",
+      "label": "Produção/economia",
+      "tokens": [
+        "ProductionEngine",
+        "EconomyBalance"
+      ]
+    },
+    {
+      "id": "worklife",
+      "label": "Turnos/exaustão",
+      "tokens": [
+        "WorkLife",
+        "factoryOpen",
+        "efficiency"
+      ]
+    },
+    {
+      "id": "finance",
+      "label": "Finanças",
+      "tokens": [
+        "finance",
+        "transaction",
+        "cash"
+      ]
+    },
+    {
+      "id": "facility",
+      "label": "Expansão do galpão",
+      "tokens": [
+        "warehouse",
+        "upgrade",
+        "facility"
+      ]
+    },
+    {
+      "id": "goals",
+      "label": "Metas/progressão",
+      "tokens": [
+        "Goal",
+        "reputation",
+        "level"
+      ]
+    },
+    {
+      "id": "skills",
+      "label": "Pesquisa/especializações",
+      "tokens": [
+        "Skill",
+        "specialty",
+        "specialization"
+      ]
+    },
+    {
+      "id": "tools",
+      "label": "Ferramentas",
+      "tokens": [
+        "Tool",
+        "qualityBonus",
+        "speedMultiplier"
+      ]
+    },
+    {
+      "id": "gacha",
+      "label": "Roleta Industrial",
+      "tokens": [
+        "Gacha",
+        "pity",
+        "ticket"
+      ]
+    },
+    {
+      "id": "character",
+      "label": "Personagem/skins",
+      "tokens": [
+        "Skin",
+        "Character",
+        "Player"
+      ]
+    },
+    {
+      "id": "community",
+      "label": "Comunidade/social",
+      "tokens": [
+        "Social",
+        "Community",
+        "Firebase"
+      ]
+    },
+    {
+      "id": "persistence",
+      "label": "Persistência multiplataforma",
+      "tokens": [
+        "Repository",
+        "save",
+        "persist"
+      ]
+    }
+  ]
+}
