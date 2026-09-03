@@ -1,48 +1,52 @@
 {
   "version": 1,
-  "createdAt": "2026-09-02T21:48:07.827Z",
+  "createdAt": "2026-09-02T23:54:52.304Z",
   "strategy": "compose-multiplatform",
-  "sourceProject": "game-usinagem-1788385659680",
+  "sourceProject": "game-usinagem-IOS",
   "analysis": {
-    "projectName": "game-usinagem-1788385659680",
-    "root": "C:\\Users\\PC-NOVO\\Documents\\Droid2iOS-Workspaces\\game-usinagem-1788385659680",
+    "projectName": "game-usinagem-IOS",
+    "root": "C:\\Users\\PC-NOVO\\Documents\\Droid2iOS-Workspaces\\game-usinagem-IOS",
     "languages": {
+      ".json": 4,
+      ".yml": 2,
       ".gitignore": 1,
-      ".kts": 3,
+      ".kts": 6,
       ".pro": 1,
-      ".json": 3,
       ".xml": 16,
-      ".kt": 114,
+      ".kt": 123,
       ".wav": 3,
-      ".md": 12,
+      ".md": 14,
       ".rules": 2,
-      ".properties": 3,
+      ".properties": 4,
       ".jar": 1,
       "gradlew": 1,
-      ".bat": 1
+      ".bat": 1,
+      ".swift": 1,
+      ".plist": 1
     },
     "signals": [
-      "Jetpack Compose"
+      "Jetpack Compose",
+      "Kotlin Multiplatform"
     ],
     "androidSignals": [
-      "Android Gradle Plugin",
       "Jetpack Compose",
+      "WorkManager",
+      "Android Gradle Plugin",
       "Room",
       "Hilt",
-      "WorkManager",
       "Firebase",
       "DataStore"
     ],
     "iosBlockers": [
+      "WorkManager precisa de equivalente iOS",
       "Room requer camada multiplataforma ou implementação iOS",
       "Hilt é Android/JVM; migrar DI para Koin/manual/common",
-      "WorkManager precisa de equivalente iOS",
       "Firebase precisa de configuração/SDK iOS",
       "DataStore precisa ser isolado/substituído para iOS",
       "APIs android.* precisam ser isoladas de commonMain"
     ],
-    "migrationScore": 52,
+    "migrationScore": 60,
     "recommendedStrategy": "compose-multiplatform",
-    "filesScanned": 161
+    "filesScanned": 181
   }
 }
