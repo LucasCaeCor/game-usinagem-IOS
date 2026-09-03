@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "createdAt": "2026-09-02T23:54:52.304Z",
+  "createdAt": "2026-09-03T02:47:14.018Z",
   "strategy": "compose-multiplatform",
   "sourceProject": "game-usinagem-IOS",
   "analysis": {
@@ -13,7 +13,7 @@
       ".kts": 6,
       ".pro": 1,
       ".xml": 16,
-      ".kt": 123,
+      ".kt": 126,
       ".wav": 3,
       ".md": 14,
       ".rules": 2,
@@ -47,6 +47,6 @@
     ],
     "migrationScore": 60,
     "recommendedStrategy": "compose-multiplatform",
-    "filesScanned": 181
+    "filesScanned": 184
   }
 }
