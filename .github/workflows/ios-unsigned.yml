@@ -97,6 +97,13 @@ jobs:
           rm -rf "$PWD/build/iphoneos" "$PWD/Payload" "$PWD/UsinagemMaster-unsigned.ipa"
           mkdir -p "$PWD/build/iphoneos"
 
+      - name: Validate Compose iOS Info.plist
+        run: |
+          set -euxo pipefail
+          VALUE="$(/usr/libexec/PlistBuddy -c 'Print :CADisableMinimumFrameDurationOnPhone' iosApp/UsinagemConverted/Info.plist)"
+          test "$VALUE" = "true"
+          echo "CADisableMinimumFrameDurationOnPhone=$VALUE"
+
       - name: Build iOS app without signing
         run: |
           set -euxo pipefail
