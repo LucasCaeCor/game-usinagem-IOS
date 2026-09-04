@@ -1,10 +1,10 @@
+import Foundation
 import UIKit
 
 final class CloudSyncGateViewController: UIViewController {
     var onReady: (() -> Void)?
     var onContinueLocal: (() -> Void)?
 
-    private let stack = UIStackView()
     private let titleLabel = UILabel()
     private let statusLabel = UILabel()
     private let detailLabel = UILabel()
@@ -12,216 +12,294 @@ final class CloudSyncGateViewController: UIViewController {
     private let cloudButton = UIButton(type: .system)
     private let localButton = UIButton(type: .system)
     private let retryButton = UIButton(type: .system)
-    private var started = false
+
+    private var didStartSync = false
+    private var isNetworkFailureMode = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        configureUI()
+        configureView()
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        guard !started else { return }
-        started = true
-        synchronize()
+
+        if !didStartSync {
+            didStartSync = true
+            synchronize()
+        }
     }
 
-    private func configureUI() {
-        view.backgroundColor = UIColor(red: 0.04, green: 0.06, blue: 0.075, alpha: 1)
+    private func configureView() {
+        view.backgroundColor = UIColor(
+            red: 0.04,
+            green: 0.06,
+            blue: 0.075,
+            alpha: 1.0
+        )
 
-        let badge = UILabel()
-        badge.text = "☁  CLOUD SAVE"
-        badge.font = .systemFont(ofSize: 13, weight: .black)
-        badge.textColor = UIColor(red: 1.0, green: 0.70, blue: 0.16, alpha: 1)
+        let badgeLabel = UILabel()
+        badgeLabel.text = "☁  CLOUD SAVE"
+        badgeLabel.font = UIFont.systemFont(ofSize: 13, weight: .black)
+        badgeLabel.textColor = UIColor(
+            red: 1.0,
+            green: 0.70,
+            blue: 0.16,
+            alpha: 1.0
+        )
 
         titleLabel.text = "Conectando sua fábrica"
         titleLabel.numberOfLines = 0
-        titleLabel.font = .systemFont(ofSize: 31, weight: .black)
+        titleLabel.font = UIFont.systemFont(ofSize: 31, weight: .black)
         titleLabel.textColor = .white
 
         statusLabel.text = "Procurando o save da sua conta Google…"
         statusLabel.numberOfLines = 0
-        statusLabel.font = .systemFont(ofSize: 17, weight: .semibold)
-        statusLabel.textColor = UIColor(white: 0.92, alpha: 1)
+        statusLabel.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
+        statusLabel.textColor = UIColor(white: 0.92, alpha: 1.0)
 
         detailLabel.text =
-            "O iPhone usa o mesmo slot privado cloud_saves/{uid} do Android. " +
-            "Nenhum save local é apagado antes de validar os chunks e o SHA-256."
+            "O iPhone usa o mesmo Cloud Save privado do Android. " +
+            "Nenhum progresso é sobrescrito antes da validação."
         detailLabel.numberOfLines = 0
-        detailLabel.font = .systemFont(ofSize: 14, weight: .regular)
-        detailLabel.textColor = UIColor(white: 0.63, alpha: 1)
+        detailLabel.font = UIFont.systemFont(ofSize: 14, weight: .regular)
+        detailLabel.textColor = UIColor(white: 0.63, alpha: 1.0)
 
-        spinner.color = UIColor(red: 1.0, green: 0.70, blue: 0.16, alpha: 1)
-        spinner.startAnimating()
+        spinner.color = UIColor(
+            red: 1.0,
+            green: 0.70,
+            blue: 0.16,
+            alpha: 1.0
+        )
+        spinner.hidesWhenStopped = true
 
-        configureButton(
-            cloudButton,
-            title: "Usar save da nuvem",
-            background: UIColor(red: 1.0, green: 0.70, blue: 0.16, alpha: 1),
-            foreground: UIColor(red: 0.06, green: 0.08, blue: 0.10, alpha: 1),
-            selector: #selector(useCloud)
+        cloudButton.setTitle("Usar save da nuvem", for: .normal)
+        cloudButton.titleLabel?.font = UIFont.systemFont(ofSize: 16, weight: .bold)
+        cloudButton.setTitleColor(
+            UIColor(red: 0.06, green: 0.08, blue: 0.10, alpha: 1.0),
+            for: .normal
         )
-        configureButton(
-            localButton,
-            title: "Manter este iPhone",
-            background: UIColor(white: 1, alpha: 0.08),
-            foreground: .white,
-            selector: #selector(useLocal)
+        cloudButton.backgroundColor = UIColor(
+            red: 1.0,
+            green: 0.70,
+            blue: 0.16,
+            alpha: 1.0
         )
-        configureButton(
-            retryButton,
-            title: "Tentar novamente",
-            background: UIColor(white: 1, alpha: 0.08),
-            foreground: .white,
-            selector: #selector(retry)
+        cloudButton.layer.cornerRadius = 14
+        cloudButton.heightAnchor.constraint(equalToConstant: 52).isActive = true
+        cloudButton.addTarget(
+            self,
+            action: #selector(useCloudTapped),
+            for: .touchUpInside
+        )
+
+        localButton.setTitle("Manter este iPhone", for: .normal)
+        localButton.titleLabel?.font = UIFont.systemFont(ofSize: 16, weight: .bold)
+        localButton.setTitleColor(.white, for: .normal)
+        localButton.backgroundColor = UIColor(white: 1.0, alpha: 0.08)
+        localButton.layer.cornerRadius = 14
+        localButton.heightAnchor.constraint(equalToConstant: 52).isActive = true
+        localButton.addTarget(
+            self,
+            action: #selector(useLocalTapped),
+            for: .touchUpInside
+        )
+
+        retryButton.setTitle("Tentar novamente", for: .normal)
+        retryButton.titleLabel?.font = UIFont.systemFont(ofSize: 16, weight: .bold)
+        retryButton.setTitleColor(.white, for: .normal)
+        retryButton.backgroundColor = UIColor(white: 1.0, alpha: 0.08)
+        retryButton.layer.cornerRadius = 14
+        retryButton.heightAnchor.constraint(equalToConstant: 52).isActive = true
+        retryButton.addTarget(
+            self,
+            action: #selector(retryTapped),
+            for: .touchUpInside
         )
 
         cloudButton.isHidden = true
         localButton.isHidden = true
         retryButton.isHidden = true
 
+        let stack = UIStackView(arrangedSubviews: [
+            badgeLabel,
+            titleLabel,
+            statusLabel,
+            detailLabel,
+            spinner,
+            cloudButton,
+            localButton,
+            retryButton
+        ])
         stack.axis = .vertical
         stack.spacing = 16
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        [badge, titleLabel, statusLabel, detailLabel, spinner, cloudButton, localButton, retryButton]
-            .forEach(stack.addArrangedSubview)
-
         view.addSubview(stack)
+
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
-            stack.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor),
+            stack.leadingAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.leadingAnchor,
+                constant: 24
+            ),
+            stack.trailingAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.trailingAnchor,
+                constant: -24
+            ),
+            stack.centerYAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.centerYAnchor
+            )
         ])
     }
 
-    private func configureButton(
-        _ button: UIButton,
-        title: String,
-        background: UIColor,
-        foreground: UIColor,
-        selector: Selector
-    ) {
-        button.setTitle(title, for: .normal)
-        button.titleLabel?.font = .systemFont(ofSize: 16, weight: .bold)
-        button.backgroundColor = background
-        button.setTitleColor(foreground, for: .normal)
-        button.layer.cornerRadius = 14
-        button.heightAnchor.constraint(equalToConstant: 52).isActive = true
-        button.addTarget(self, action: selector, for: .touchUpInside)
-    }
-
     private func synchronize() {
+        isNetworkFailureMode = false
         setBusy(true)
+
+        titleLabel.text = "Conectando sua fábrica"
         statusLabel.text = "Comparando save Android e iPhone…"
-        retryButton.isHidden = true
+        detailLabel.text =
+            "Validando saveId, revisão, chunks, GZIP e SHA-256 antes de abrir o jogo."
+
         cloudButton.isHidden = true
         localButton.isHidden = true
+        retryButton.isHidden = true
 
         FirebaseCloudSaveService.shared.synchronize { [weak self] result in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self = self else {
+                    return
+                }
+
                 self.setBusy(false)
 
                 switch result {
                 case .failure(let error):
-                    self.titleLabel.text = "Não consegui acessar a nuvem"
-                    self.statusLabel.text = error.localizedDescription
-                    self.detailLabel.text =
-                        "Seu save local foi preservado. Você pode tentar novamente " +
-                        "ou continuar no iPhone sem restaurar agora."
-                    self.retryButton.isHidden = false
-                    self.localButton.setTitle("Continuar com save local", for: .normal)
-                    self.localButton.isHidden = false
+                    self.showSyncFailure(error)
 
-                case .success(let sync):
-                    self.statusLabel.text = sync.message
-                    switch sync.action {
-                    case .restored:
-                        self.titleLabel.text = "Fábrica Android recuperada"
-                        self.detailLabel.text =
-                            "Cloud Save \(short(sync.saveId)) • revisão \(sync.revision). " +
-                            "Abrindo o jogo com o progresso restaurado."
-                        self.finishSoon()
-
-                    case .uploaded:
-                        self.titleLabel.text = "Cloud Save vinculado"
-                        self.detailLabel.text =
-                            "O save local foi associado à mesma conta Google e enviado com segurança."
-                        self.finishSoon()
-
-                    case .upToDate:
-                        self.titleLabel.text = "Tudo sincronizado"
-                        self.detailLabel.text =
-                            "Android e iPhone apontam para o mesmo slot de Cloud Save."
-                        self.finishSoon()
-
-                    case .noLocal:
-                        self.titleLabel.text = "Conta conectada"
-                        self.detailLabel.text =
-                            "Não existe backup remoto nem save local ainda. " +
-                            "A oficina será criada normalmente e sincronizada depois."
-                        self.finishSoon()
-
-                    case .conflict:
-                        self.titleLabel.text = "Escolha qual progresso manter"
-                        self.detailLabel.text =
-                            "Nenhum lado foi sobrescrito. “Usar nuvem” baixa o Android; " +
-                            "“Manter este iPhone” publica o estado local como uma nova revisão."
-                        self.cloudButton.isHidden = false
-                        self.localButton.setTitle("Manter este iPhone", for: .normal)
-                        self.localButton.isHidden = false
-                    }
+                case .success(let syncResult):
+                    self.handleSyncResult(syncResult)
                 }
             }
         }
     }
 
-    @objc private func useCloud() {
+    private func handleSyncResult(_ syncResult: IOSCloudSyncResult) {
+        statusLabel.text = syncResult.message
+
+        switch syncResult.action {
+        case .restored:
+            titleLabel.text = "Fábrica Android recuperada"
+            detailLabel.text =
+                "O Cloud Save foi validado e convertido para o save iOS. " +
+                "Abrindo o jogo com a fábrica restaurada."
+            finishGate()
+
+        case .uploaded:
+            titleLabel.text = "Cloud Save vinculado"
+            detailLabel.text =
+                "O save deste iPhone foi associado à sua conta Google com segurança."
+            finishGate()
+
+        case .upToDate:
+            titleLabel.text = "Tudo sincronizado"
+            detailLabel.text =
+                "Android e iPhone estão usando o mesmo slot de Cloud Save."
+            finishGate()
+
+        case .noLocal:
+            titleLabel.text = "Conta conectada"
+            detailLabel.text =
+                "Ainda não existe save local nem backup remoto. " +
+                "A oficina será criada normalmente."
+            finishGate()
+
+        case .conflict:
+            titleLabel.text = "Escolha qual progresso manter"
+            detailLabel.text =
+                "Nenhum progresso foi sobrescrito. " +
+                "Use a nuvem para trazer o Android ou mantenha o estado deste iPhone."
+            cloudButton.isHidden = false
+            localButton.setTitle("Manter este iPhone", for: .normal)
+            localButton.isHidden = false
+        }
+    }
+
+    private func showSyncFailure(_ error: Error) {
+        isNetworkFailureMode = true
+        titleLabel.text = "Não consegui acessar o Cloud Save"
+        statusLabel.text = error.localizedDescription
+        detailLabel.text =
+            "O save local continua intacto. " +
+            "Você pode tentar novamente ou abrir o jogo sem restaurar agora."
+
+        retryButton.isHidden = false
+        localButton.setTitle("Continuar com save local", for: .normal)
+        localButton.isHidden = false
+    }
+
+    @objc private func useCloudTapped() {
         setBusy(true)
+        cloudButton.isHidden = true
+        localButton.isHidden = true
+
         FirebaseCloudSaveService.shared.forceRestore { [weak self] result in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self = self else {
+                    return
+                }
+
                 self.setBusy(false)
+
                 switch result {
                 case .failure(let error):
-                    self.statusLabel.text = error.localizedDescription
-                    self.retryButton.isHidden = false
-                case .success(let sync):
-                    self.statusLabel.text = sync.message
+                    self.showSyncFailure(error)
+
+                case .success(let syncResult):
                     self.titleLabel.text = "Save da nuvem restaurado"
-                    self.finishSoon()
+                    self.statusLabel.text = syncResult.message
+                    self.detailLabel.text =
+                        "A fábrica Android foi validada e restaurada neste iPhone."
+                    self.finishGate()
                 }
             }
         }
     }
 
-    @objc private func useLocal() {
-        // Em erro de rede, permite continuar sem sobrescrever nada.
-        if retryButton.isHidden == false {
+    @objc private func useLocalTapped() {
+        if isNetworkFailureMode {
             onContinueLocal?()
             return
         }
 
         setBusy(true)
+        cloudButton.isHidden = true
+        localButton.isHidden = true
+
         FirebaseCloudSaveService.shared.forceUpload { [weak self] result in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self = self else {
+                    return
+                }
+
                 self.setBusy(false)
+
                 switch result {
                 case .failure(let error):
-                    self.statusLabel.text = error.localizedDescription
-                    self.retryButton.isHidden = false
-                case .success(let sync):
-                    self.statusLabel.text = sync.message
+                    self.showSyncFailure(error)
+
+                case .success(let syncResult):
                     self.titleLabel.text = "Save do iPhone mantido"
-                    self.finishSoon()
+                    self.statusLabel.text = syncResult.message
+                    self.detailLabel.text =
+                        "O estado local foi publicado como a nova revisão do Cloud Save."
+                    self.finishGate()
                 }
             }
         }
     }
 
-    @objc private func retry() {
+    @objc private func retryTapped() {
         synchronize()
     }
 
@@ -229,21 +307,24 @@ final class CloudSyncGateViewController: UIViewController {
         cloudButton.isEnabled = !busy
         localButton.isEnabled = !busy
         retryButton.isEnabled = !busy
-        busy ? spinner.startAnimating() : spinner.stopAnimating()
+
+        if busy {
+            spinner.startAnimating()
+        } else {
+            spinner.stopAnimating()
+        }
     }
 
-    private func finishSoon() {
+    private func finishGate() {
         setBusy(false)
         cloudButton.isHidden = true
         localButton.isHidden = true
         retryButton.isHidden = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { [weak self] in
+
+        DispatchQueue.main.asyncAfter(
+            deadline: DispatchTime.now() + DispatchTimeInterval.milliseconds(450)
+        ) { [weak self] in
             self?.onReady?()
         }
-    }
-
-    private func short(_ value: String) -> String {
-        guard value.count > 12 else { return value }
-        return String(value.prefix(8)) + "…"
     }
 }
