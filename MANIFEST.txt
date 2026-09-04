@@ -1,7 +1,11 @@
-V25 PARITY MANIFEST
-- FactoryStudio.kt: interactive KMP factory scene + owner/worker/machine UX + visual pass
-- GameStore.kt: directed reprimand + direct machine operator assignment/removal
-- FactorySimulation.kt: verified, not modified
-- FactoryOwnerSimulation.kt: verified, not modified
-- AndroidV24Gameplay.kt: verified, not modified
-- PersistentGameModels.kt schema 4: verified, not modified
+V25.2
+- aplicar-ios-fabrica-viva-paridade-android-v25-2.mjs
+- payload/FactoryStudio.kt (V25 + MachineMastery correto)
+- payload/GameStore.kt (APIs V25)
+- README.txt
+
+Compatibilidade:
+- pré-V25
+- V25
+- V25.1 anterior
+- V25.2 idempotente

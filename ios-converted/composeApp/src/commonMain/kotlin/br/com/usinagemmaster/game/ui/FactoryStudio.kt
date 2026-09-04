@@ -43,10 +43,10 @@ import br.com.usinagemmaster.game.domain.GameStore
 import br.com.usinagemmaster.game.domain.MachineMinigameCatalog
 import br.com.usinagemmaster.game.domain.MinigameKind
 import br.com.usinagemmaster.game.domain.MinigameResult
+import br.com.usinagemmaster.game.domain.MachineMastery
 import br.com.usinagemmaster.game.domain.ProductionStage
 import br.com.usinagemmaster.game.model.EmployeeSave
 import br.com.usinagemmaster.game.model.MachineSave
-import br.com.usinagemmaster.game.model.MachineMastery
 import br.com.usinagemmaster.game.model.OwnerWorkBatchSave
 import br.com.usinagemmaster.game.model.PlayerProfileSave
 import kotlin.math.abs
