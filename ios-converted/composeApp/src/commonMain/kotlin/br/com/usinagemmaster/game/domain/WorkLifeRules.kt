@@ -12,17 +12,69 @@ object WorkLifeRules {
 
     fun efficiency(employee: EmployeeSave, now: Long): Double {
         if (resting(employee, now)) return 0.0
-        return (1.0 - employee.fatigue.coerceIn(0, 100) / 145.0).coerceIn(.35, 1.0)
+        val fatigue = employee.fatigue.coerceIn(0.0, 100.0)
+        return (1.0 - fatigue / 145.0).coerceIn(.35, 1.0)
     }
 
-    fun afterWorked(employee: EmployeeSave, minutes: Long, mode: ShiftMode): EmployeeSave {
-        val gainPer10 = if (mode == ShiftMode.CONTINUOUS_24H) 5 else 3
-        val gain = ((minutes / 10L).coerceAtLeast(1L) * gainPer10).toInt()
-        return employee.copy(fatigue = (employee.fatigue + gain).coerceAtMost(100))
+    /**
+     * Mesma base do FatigueAccrual Android:
+     * - sem máquina: 1.2/h
+     * - turno normal atribuído: 4.0/h
+     * - 24h atribuído: 6.5/h
+     * - pausa fora de expediente: -8.5/h
+     * - descanso na Copa: -28/h
+     */
+    fun advanceFatigue(
+        employee: EmployeeSave,
+        assigned: Boolean,
+        continuous: Boolean,
+        workHours: Double,
+        pausedHours: Double,
+        restHours: Double,
+    ): EmployeeSave {
+        val working = workHours.coerceAtLeast(0.0)
+        val restingHours = restHours.coerceIn(0.0, working)
+        val rate = when {
+            !assigned -> 1.2
+            continuous -> 6.5
+            else -> 4.0
+        }
+        val next = (
+            employee.fatigue +
+                rate * (working - restingHours) -
+                8.5 * pausedHours.coerceAtLeast(0.0) -
+                28.0 * restingHours
+            ).coerceIn(0.0, 100.0)
+        return employee.copy(fatigue = next)
     }
 
-    fun afterRest(employee: EmployeeSave, minutes: Long): EmployeeSave {
-        val recovered = ((minutes / 10L).coerceAtLeast(1L) * 8).toInt()
-        return employee.copy(fatigue = (employee.fatigue - recovered).coerceAtLeast(0))
-    }
+    fun afterWorked(employee: EmployeeSave, minutes: Long, mode: ShiftMode): EmployeeSave =
+        advanceFatigue(
+            employee = employee,
+            assigned = employee.assignedMachineId != null,
+            continuous = mode == ShiftMode.CONTINUOUS_24H,
+            workHours = minutes.coerceAtLeast(0L) / 60.0,
+            pausedHours = 0.0,
+            restHours = 0.0,
+        )
+
+    fun afterRest(employee: EmployeeSave, minutes: Long): EmployeeSave =
+        advanceFatigue(
+            employee = employee,
+            assigned = employee.assignedMachineId != null,
+            continuous = false,
+            workHours = minutes.coerceAtLeast(0L) / 60.0,
+            pausedHours = 0.0,
+            restHours = minutes.coerceAtLeast(0L) / 60.0,
+        )
+
+    fun afterClosedShift(employee: EmployeeSave, minutes: Long): EmployeeSave =
+        advanceFatigue(
+            employee = employee,
+            assigned = employee.assignedMachineId != null,
+            continuous = false,
+            workHours = 0.0,
+            pausedHours = minutes.coerceAtLeast(0L) / 60.0,
+            restHours = 0.0,
+        )
 }

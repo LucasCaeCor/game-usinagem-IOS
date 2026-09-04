@@ -3,12 +3,17 @@ package br.com.usinagemmaster.game.persistence
 import br.com.usinagemmaster.game.model.*
 
 /**
- * Codec textual versionado e sem dependência de kotlinx.serialization.
- * Cada mutação do jogo é persistida no storage nativo da plataforma.
+ * Codec textual versionado sem dependências extras.
+ *
+ * Compatibilidade:
+ * - lê o save V6 (schema 2);
+ * - grava schema 3;
+ * - campos novos possuem defaults seguros;
+ * - o mesmo SAVE_KEY é mantido pelo GameStore.
  */
 object GameSaveCodec {
     fun encode(save: GameSave): String = buildString {
-        row("VERSION", save.schemaVersion)
+        row("VERSION", 3)
         row(
             "COMPANY",
             save.company.name,
@@ -27,7 +32,26 @@ object GameSaveCodec {
             save.lastDailyBonusDay,
         )
         row(
-            "EXP",
+            "UX3",
+            save.uiSettings.soundEnabled,
+            save.uiSettings.hapticsEnabled,
+            save.uiSettings.legendarySpeechEnabled,
+            save.uiSettings.legendarySpeechSeconds,
+        )
+        row(
+            "WORKFORCE3",
+            save.workforce.idleEmployeeId ?: "",
+            save.workforce.idleSinceAt,
+            save.workforce.idleUntilAt,
+            save.workforce.nextIdleCheckAt,
+        )
+        row(
+            "MINIGAME3",
+            save.lastMinigameAt,
+            save.bestMinigameScore,
+        )
+        row(
+            "EXP3",
             save.expansion.specialty,
             encodeSet(save.expansion.companySkills),
             encodeSet(save.expansion.playerSkills),
@@ -38,20 +62,25 @@ object GameSaveCodec {
             save.expansion.equippedSkin,
             encodeSet(save.expansion.ownedCharacters),
             save.expansion.equippedCharacter ?: "",
-            encodeMap(save.expansion.tools),
+            encodeIntMap(save.expansion.tools),
+            encodeStringMap(save.expansion.contractTools),
             encodeSet(save.expansion.premiumMachines),
             save.expansion.playerXp,
+            save.expansion.lastDailyTicketDay,
         )
         row(
-            "PROFILE",
+            "PROFILE3",
             save.profile.name,
+            save.profile.gender,
+            save.profile.skinStyle,
             save.profile.bodyType,
             save.profile.skinTone,
-            save.profile.hair,
+            save.profile.hairStyle,
             save.profile.hairColor,
-            save.profile.uniform,
-            save.profile.helmet,
+            save.profile.uniformColor,
+            save.profile.helmetColor,
             save.profile.accessory,
+            save.profile.onboardingComplete,
         )
         save.machines.forEach {
             row(
@@ -68,21 +97,21 @@ object GameSaveCodec {
         }
         save.contracts.forEach {
             row(
-                "C", it.id, it.clientName, it.type, it.quantity, it.completedQuantity,
+                "C3", it.id, it.clientName, it.type, it.quantity, it.completedQuantity,
                 it.productionProgressMilli, it.difficulty, it.requiredQuality,
                 it.rewardCents, it.penaltyCents, it.reputationReward,
                 it.reputationPenalty, it.generatedAt, it.startedAt, it.deadlineAt,
-                it.status, it.rewardPaid,
+                it.status, it.rewardPaid, it.special,
             )
         }
-        save.cargo.forEach {
+        save.cargo.takeLast(300).forEach {
             row("CARGO", it.id, it.valueCents, it.unitsMilli, it.cycles, it.createdAt, it.deliveredAt)
         }
-        save.finances.takeLast(200).forEach {
+        save.finances.takeLast(300).forEach {
             row("F", it.id, it.type, it.category, it.amountCents, it.description, it.createdAt)
         }
         save.goals.forEach {
-            row("G", it.id, it.title, it.target, it.rewardCents, it.claimed)
+            row("G3", it.id, it.title, it.target, it.rewardCents, it.ticketReward, it.claimed)
         }
     }
 
@@ -93,8 +122,13 @@ object GameSaveCodec {
         var boostTokens = 2
         var snackUntil = 0L
         var lastDaily = -1L
+        var lastMinigameAt = 0L
+        var bestMinigameScore = 0.0
         var expansion = ExpansionSave()
         var profile = PlayerProfileSave()
+        var uiSettings = UiSettingsSave()
+        var workforce = WorkforceSave()
+
         val machines = mutableListOf<MachineSave>()
         val employees = mutableListOf<EmployeeSave>()
         val contracts = mutableListOf<ContractSave>()
@@ -116,12 +150,30 @@ object GameSaveCodec {
                     lastSimulationAt = p.long(7),
                 )
                 "SETTINGS" -> {
-                    shift = runCatching { ShiftMode.valueOf(p.text(1, ShiftMode.DAY_12H.name)) }
-                        .getOrDefault(ShiftMode.DAY_12H)
+                    shift = runCatching {
+                        ShiftMode.valueOf(p.text(1, ShiftMode.DAY_12H.name))
+                    }.getOrDefault(ShiftMode.DAY_12H)
                     boostTokens = p.int(2, 2)
                     snackUntil = p.long(3)
                     lastDaily = p.long(4, -1L)
                 }
+                "UX3" -> uiSettings = UiSettingsSave(
+                    soundEnabled = p.bool(1, true),
+                    hapticsEnabled = p.bool(2, true),
+                    legendarySpeechEnabled = p.bool(3, true),
+                    legendarySpeechSeconds = p.int(4, 5).coerceIn(2, 12),
+                )
+                "WORKFORCE3" -> workforce = WorkforceSave(
+                    idleEmployeeId = p.text(1).ifBlank { null },
+                    idleSinceAt = p.long(2),
+                    idleUntilAt = p.long(3),
+                    nextIdleCheckAt = p.long(4),
+                )
+                "MINIGAME3" -> {
+                    lastMinigameAt = p.long(1)
+                    bestMinigameScore = p.double(2).coerceIn(0.0, 1.0)
+                }
+                // V6 expansion row.
                 "EXP" -> expansion = ExpansionSave(
                     specialty = p.text(1, "generalista"),
                     companySkills = decodeSet(p.text(2)),
@@ -133,21 +185,51 @@ object GameSaveCodec {
                     equippedSkin = p.text(8, "operador_padrao"),
                     ownedCharacters = decodeSet(p.text(9)),
                     equippedCharacter = p.text(10).ifBlank { null },
-                    tools = decodeMap(p.text(11)).ifEmpty {
-                        mapOf("broca_madeira" to 2, "ferramenta_soldada" to 2, "fresa_hss" to 1)
-                    },
+                    tools = decodeIntMap(p.text(11)).ifEmpty(::starterTools),
                     premiumMachines = decodeSet(p.text(12)),
                     playerXp = p.long(13),
                 )
+                "EXP3" -> expansion = ExpansionSave(
+                    specialty = p.text(1, "generalista"),
+                    companySkills = decodeSet(p.text(2)),
+                    playerSkills = decodeSet(p.text(3)),
+                    gachaTickets = p.int(4, 5),
+                    pityEpic = p.int(5),
+                    pityLegendary = p.int(6),
+                    ownedSkins = decodeSet(p.text(7)).ifEmpty { setOf("operador_padrao") },
+                    equippedSkin = p.text(8, "operador_padrao"),
+                    ownedCharacters = decodeSet(p.text(9)),
+                    equippedCharacter = p.text(10).ifBlank { null },
+                    tools = decodeIntMap(p.text(11)).ifEmpty(::starterTools),
+                    contractTools = decodeStringMap(p.text(12)),
+                    premiumMachines = decodeSet(p.text(13)),
+                    playerXp = p.long(14),
+                    lastDailyTicketDay = p.long(15, -1L),
+                )
+                // V6 profile row: Portuguese display values are normalized to stable codes.
                 "PROFILE" -> profile = PlayerProfileSave(
                     name = p.text(1, "Dono da Oficina"),
-                    bodyType = p.text(2, "Padrão"),
-                    skinTone = p.text(3, "Médio"),
-                    hair = p.text(4, "Curto"),
-                    hairColor = p.text(5, "Castanho"),
-                    uniform = p.text(6, "Azul industrial"),
-                    helmet = p.bool(7, true),
-                    accessory = p.text(8, "Nenhum"),
+                    bodyType = normalizeBody(p.text(2)),
+                    skinTone = normalizeSkinTone(p.text(3)),
+                    hairStyle = normalizeHair(p.text(4)),
+                    hairColor = normalizeHairColor(p.text(5)),
+                    uniformColor = normalizeUniform(p.text(6)),
+                    helmetColor = if (p.bool(7, true)) "YELLOW" else "NONE",
+                    accessory = normalizeAccessory(p.text(8)),
+                    onboardingComplete = true,
+                )
+                "PROFILE3" -> profile = PlayerProfileSave(
+                    name = p.text(1, "Dono da Oficina"),
+                    gender = p.text(2, "MALE"),
+                    skinStyle = p.text(3, "WORKSHOP"),
+                    bodyType = p.text(4, "STANDARD"),
+                    skinTone = p.text(5, "MEDIUM"),
+                    hairStyle = p.text(6, "SHORT"),
+                    hairColor = p.text(7, "DARK"),
+                    uniformColor = p.text(8, "NAVY"),
+                    helmetColor = p.text(9, "YELLOW"),
+                    accessory = p.text(10, "NONE"),
+                    onboardingComplete = p.bool(11),
                 )
                 "M" -> machines += MachineSave(
                     id = p.text(1),
@@ -170,9 +252,10 @@ object GameSaveCodec {
                     trait = p.text(8, "Cuidadoso"),
                     assignedMachineId = p.text(9).ifBlank { null },
                     legendaryCode = p.text(10).ifBlank { null },
-                    fatigue = p.int(11),
+                    fatigue = p.double(11),
                     restingUntil = p.long(12),
                 )
+                // V6 contract row.
                 "C" -> contracts += ContractSave(
                     id = p.text(1),
                     clientName = p.text(2),
@@ -191,6 +274,26 @@ object GameSaveCodec {
                     deadlineAt = p.long(15),
                     status = p.text(16, "AVAILABLE"),
                     rewardPaid = p.bool(17),
+                )
+                "C3" -> contracts += ContractSave(
+                    id = p.text(1),
+                    clientName = p.text(2),
+                    type = p.text(3),
+                    quantity = p.int(4, 1),
+                    completedQuantity = p.int(5),
+                    productionProgressMilli = p.long(6),
+                    difficulty = p.int(7, 1),
+                    requiredQuality = p.int(8, 50),
+                    rewardCents = p.long(9),
+                    penaltyCents = p.long(10),
+                    reputationReward = p.int(11),
+                    reputationPenalty = p.int(12),
+                    generatedAt = p.long(13),
+                    startedAt = p.long(14),
+                    deadlineAt = p.long(15),
+                    status = p.text(16, "AVAILABLE"),
+                    rewardPaid = p.bool(17),
+                    special = p.bool(18),
                 )
                 "CARGO" -> cargo += ProductionCargoSave(
                     id = p.text(1),
@@ -213,13 +316,22 @@ object GameSaveCodec {
                     title = p.text(2),
                     target = p.int(3),
                     rewardCents = p.long(4),
+                    ticketReward = 0,
                     claimed = p.bool(5),
+                )
+                "G3" -> goals += GoalSave(
+                    id = p.text(1),
+                    title = p.text(2),
+                    target = p.int(3),
+                    rewardCents = p.long(4),
+                    ticketReward = p.int(5),
+                    claimed = p.bool(6),
                 )
             }
         }
 
         GameSave(
-            schemaVersion = version.coerceAtLeast(2),
+            schemaVersion = maxOf(3, version),
             company = company ?: return null,
             machines = machines,
             employees = employees,
@@ -229,12 +341,66 @@ object GameSaveCodec {
             goals = goals,
             expansion = expansion,
             profile = profile,
+            uiSettings = uiSettings,
+            workforce = workforce,
             shiftMode = shift,
             boostTokens = boostTokens.coerceAtLeast(0),
             snackUntil = snackUntil,
             lastDailyBonusDay = lastDaily,
+            lastMinigameAt = lastMinigameAt,
+            bestMinigameScore = bestMinigameScore,
         )
     }.getOrNull()
+
+    private fun starterTools() = mapOf(
+        "broca_madeira" to 2,
+        "ferramenta_soldada" to 2,
+        "fresa_hss" to 1,
+    )
+
+    private fun normalizeBody(value: String) = when (value.uppercase()) {
+        "MAGRO", "SLIM" -> "SLIM"
+        "FORTE", "STRONG" -> "STRONG"
+        else -> "STANDARD"
+    }
+
+    private fun normalizeSkinTone(value: String) = when (value.uppercase()) {
+        "CLARO", "LIGHT" -> "LIGHT"
+        "BRONZEADO", "TAN" -> "TAN"
+        "ESCURO", "DARK" -> "DARK"
+        else -> "MEDIUM"
+    }
+
+    private fun normalizeHair(value: String) = when (value.uppercase()) {
+        "RASPADINHO", "BUZZ" -> "BUZZ"
+        "MOICANO", "MOHAWK" -> "MOHAWK"
+        "LONGO", "LONG" -> "LONG"
+        "RABO DE CAVALO", "PONYTAIL" -> "PONYTAIL"
+        "CACHEADO", "CURLY" -> "CURLY"
+        "CARECA", "BALD" -> "BALD"
+        else -> "SHORT"
+    }
+
+    private fun normalizeHairColor(value: String) = when (value.uppercase()) {
+        "CASTANHO", "BROWN" -> "BROWN"
+        "LOIRO", "BLONDE" -> "BLONDE"
+        "CINZA", "GRAY" -> "GRAY"
+        else -> "DARK"
+    }
+
+    private fun normalizeUniform(value: String) = when (value.uppercase()) {
+        "AZUL", "BLUE" -> "BLUE"
+        "GRAFITE", "GRAPHITE" -> "GRAPHITE"
+        "VERDE", "GREEN" -> "GREEN"
+        "LARANJA", "ORANGE" -> "ORANGE"
+        else -> "NAVY"
+    }
+
+    private fun normalizeAccessory(value: String) = when (value.uppercase()) {
+        "ÓCULOS", "OCULOS", "GLASSES" -> "GLASSES"
+        "HEADSET" -> "HEADSET"
+        else -> "NONE"
+    }
 
     private fun StringBuilder.row(vararg values: Any?) {
         append(values.joinToString("|") { escape(it?.toString().orEmpty()) })
@@ -261,15 +427,26 @@ object GameSaveCodec {
         values.joinToString(";") { escape(it) }
 
     private fun decodeSet(value: String): Set<String> =
-        if (value.isBlank()) emptySet() else value.split(';').map(::unescape).filter { it.isNotBlank() }.toSet()
+        if (value.isBlank()) emptySet()
+        else value.split(';').map(::unescape).filter { it.isNotBlank() }.toSet()
 
-    private fun encodeMap(values: Map<String, Int>): String =
+    private fun encodeIntMap(values: Map<String, Int>): String =
         values.entries.joinToString(";") { "${escape(it.key)}=${it.value}" }
 
-    private fun decodeMap(value: String): Map<String, Int> =
+    private fun decodeIntMap(value: String): Map<String, Int> =
         if (value.isBlank()) emptyMap() else value.split(';').mapNotNull {
             val parts = it.split('=', limit = 2)
-            if (parts.size != 2) null else parts[1].toIntOrNull()?.let { count -> unescape(parts[0]) to count }
+            if (parts.size != 2) null
+            else parts[1].toIntOrNull()?.let { count -> unescape(parts[0]) to count }
+        }.toMap()
+
+    private fun encodeStringMap(values: Map<String, String>): String =
+        values.entries.joinToString(";") { "${escape(it.key)}=${escape(it.value)}" }
+
+    private fun decodeStringMap(value: String): Map<String, String> =
+        if (value.isBlank()) emptyMap() else value.split(';').mapNotNull {
+            val parts = it.split('=', limit = 2)
+            if (parts.size != 2) null else unescape(parts[0]) to unescape(parts[1])
         }.toMap()
 
     private fun List<String>.text(index: Int, default: String = ""): String =
@@ -280,6 +457,9 @@ object GameSaveCodec {
 
     private fun List<String>.long(index: Int, default: Long = 0L): Long =
         getOrNull(index)?.toLongOrNull() ?: default
+
+    private fun List<String>.double(index: Int, default: Double = 0.0): Double =
+        getOrNull(index)?.toDoubleOrNull() ?: default
 
     private fun List<String>.bool(index: Int, default: Boolean = false): Boolean =
         when (getOrNull(index)?.lowercase()) {

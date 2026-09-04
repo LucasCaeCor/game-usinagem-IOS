@@ -32,7 +32,7 @@ data class EmployeeSave(
     val trait: String = "Cuidadoso",
     val assignedMachineId: String? = null,
     val legendaryCode: String? = null,
-    val fatigue: Int = 0,
+    val fatigue: Double = 0.0,
     val restingUntil: Long = 0L,
 )
 
@@ -54,6 +54,7 @@ data class ContractSave(
     val deadlineAt: Long,
     val status: String = "AVAILABLE",
     val rewardPaid: Boolean = false,
+    val special: Boolean = false,
 )
 
 data class ProductionCargoSave(
@@ -81,6 +82,7 @@ data class GoalSave(
     val title: String,
     val target: Int,
     val rewardCents: Long,
+    val ticketReward: Int = 0,
     val claimed: Boolean = false,
 )
 
@@ -105,23 +107,42 @@ data class ExpansionSave(
         "ferramenta_soldada" to 2,
         "fresa_hss" to 1,
     ),
+    val contractTools: Map<String, String> = emptyMap(),
     val premiumMachines: Set<String> = emptySet(),
     val playerXp: Long = 0L,
+    val lastDailyTicketDay: Long = -1L,
 )
 
 data class PlayerProfileSave(
     val name: String = "Dono da Oficina",
-    val bodyType: String = "Padrão",
-    val skinTone: String = "Médio",
-    val hair: String = "Curto",
-    val hairColor: String = "Castanho",
-    val uniform: String = "Azul industrial",
-    val helmet: Boolean = true,
-    val accessory: String = "Nenhum",
+    val gender: String = "MALE",
+    val skinStyle: String = "WORKSHOP",
+    val bodyType: String = "STANDARD",
+    val skinTone: String = "MEDIUM",
+    val hairStyle: String = "SHORT",
+    val hairColor: String = "DARK",
+    val uniformColor: String = "NAVY",
+    val helmetColor: String = "YELLOW",
+    val accessory: String = "NONE",
+    val onboardingComplete: Boolean = false,
+)
+
+data class UiSettingsSave(
+    val soundEnabled: Boolean = true,
+    val hapticsEnabled: Boolean = true,
+    val legendarySpeechEnabled: Boolean = true,
+    val legendarySpeechSeconds: Int = 5,
+)
+
+data class WorkforceSave(
+    val idleEmployeeId: String? = null,
+    val idleSinceAt: Long = 0L,
+    val idleUntilAt: Long = 0L,
+    val nextIdleCheckAt: Long = 0L,
 )
 
 data class GameSave(
-    val schemaVersion: Int = 2,
+    val schemaVersion: Int = 3,
     val company: CompanySave,
     val machines: List<MachineSave> = emptyList(),
     val employees: List<EmployeeSave> = emptyList(),
@@ -131,8 +152,12 @@ data class GameSave(
     val goals: List<GoalSave> = emptyList(),
     val expansion: ExpansionSave = ExpansionSave(),
     val profile: PlayerProfileSave = PlayerProfileSave(),
+    val uiSettings: UiSettingsSave = UiSettingsSave(),
+    val workforce: WorkforceSave = WorkforceSave(),
     val shiftMode: ShiftMode = ShiftMode.DAY_12H,
     val boostTokens: Int = 2,
     val snackUntil: Long = 0L,
     val lastDailyBonusDay: Long = -1L,
+    val lastMinigameAt: Long = 0L,
+    val bestMinigameScore: Double = 0.0,
 )

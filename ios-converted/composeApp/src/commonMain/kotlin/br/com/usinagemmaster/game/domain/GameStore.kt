@@ -5,29 +5,30 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import br.com.usinagemmaster.domain.catalog.MachineCatalog
 import br.com.usinagemmaster.domain.model.*
-import br.com.usinagemmaster.domain.simulation.EconomyBalance
-import br.com.usinagemmaster.domain.simulation.ProductionEngine
-import br.com.usinagemmaster.domain.simulation.ProductionModifiers
+import br.com.usinagemmaster.domain.simulation.*
 import br.com.usinagemmaster.game.model.*
 import br.com.usinagemmaster.game.persistence.GameSaveCodec
 import br.com.usinagemmaster.game.persistence.PlatformSaveStorage
 import kotlin.math.ceil
+import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.random.Random
 
-private const val SAVE_KEY = "usinagemmaster.kmp.save.v6"
+private const val SAVE_KEY = "usinagemmaster.kmp.save.v6" // mantém o save criado pela V6.
 private const val CYCLE_MILLIS = 10L * 60L * 1000L
 private const val MAX_OFFLINE_MILLIS = 24L * 60L * 60L * 1000L
 private const val REST_MILLIS = 60L * 60L * 1000L
 
-enum class OwnerActivity(val label: String) {
-    IDLE("Aguardando carga"),
-    COLLECTING("Indo buscar a carga"),
-    LOADING("Carregando caixas"),
-    DELIVERING("Levando à entrega"),
-    UNLOADING("Descarregando"),
-    RETURNING("Voltando ao galpão"),
-}
+private const val DAILY_BOOST_TOKENS = 2
+private const val MINIGAME_COOLDOWN_MILLIS = 15L * 60L * 1000L
+private const val TEAM_SNACK_COST_CENTS = 25_000L
+private const val SNACK_IMMUNITY_MILLIS = 8L * 60L * 60L * 1000L
+private const val EMPLOYEE_IDLE_MAX_MILLIS = 7L * 60L * 1000L
+private const val IDLE_CHECK_MIN_MILLIS = 2L * 60L * 1000L
+private const val IDLE_CHECK_MAX_MILLIS = 5L * 60L * 1000L
+private const val REPRIMAND_GRACE_MILLIS = 60L * 60L * 1000L
+private const val IDLE_EVENT_CHANCE_PERCENT = 30
 
 class GameStore {
     var state by mutableStateOf(loadOrCreate())
@@ -36,17 +37,25 @@ class GameStore {
     var message by mutableStateOf<String?>(null)
         private set
 
-    var ownerActivity by mutableStateOf(OwnerActivity.IDLE)
+    var factoryFrame by mutableStateOf(FactoryFrame())
         private set
 
-    private var deliveryIds: List<String> = emptyList()
-    private var deliveryStartedAt: Long = 0L
+    var ownerFrame by mutableStateOf(FactoryOwnerFrame())
+        private set
+
+    var lastGachaReward by mutableStateOf<GachaRewardDef?>(null)
+        private set
+
+    private val factorySimulation = FactorySimulation()
+    private val ownerSimulation = FactoryOwnerSimulation()
+    private var cargoInTransitIds: List<String> = emptyList()
     private var idCounter: Long = 0L
 
     init {
         normalizeAndPersist()
         simulateOffline()
         ensureContracts()
+        refreshFactoryInput()
     }
 
     val dashboard: DashboardStatus
@@ -78,13 +87,26 @@ class GameStore {
     val machineShop
         get() = MachineType.values().mapNotNull { MachineCatalog.byType(it.name) }
 
+    val snackActive: Boolean
+        get() = state.snackUntil > currentTimeMillis()
+
+    val idleEmployee: EmployeeSave?
+        get() = state.workforce.idleEmployeeId?.let { id -> state.employees.firstOrNull { it.id == id } }
+
+    val minigameAvailable: Boolean
+        get() = currentTimeMillis() - state.lastMinigameAt >= MINIGAME_COOLDOWN_MILLIS
+
+    val minigameRemainingMillis: Long
+        get() = (MINIGAME_COOLDOWN_MILLIS - (currentTimeMillis() - state.lastMinigameAt)).coerceAtLeast(0L)
+
     fun clearMessage() {
         message = null
     }
 
+    /** Economia/disciplinas; chamado 1x/s. */
     fun tick() {
         val now = currentTimeMillis()
-        advanceOwner(now)
+        updateIdleDiscipline(now)
 
         val elapsed = (now - state.company.lastSimulationAt).coerceAtLeast(0L)
         val settled = (elapsed / CYCLE_MILLIS) * CYCLE_MILLIS
@@ -92,12 +114,34 @@ class GameStore {
             simulateSettled(settled, now, advanceClock = true)
             ensureContracts()
         }
+        refreshFactoryInput()
+    }
+
+    /** Cena operacional; chamado em cadência visual (~20 fps), sem alterar ledger por frame. */
+    fun advanceVisual(seconds: Double) {
+        refreshFactoryInput()
+        factoryFrame = factorySimulation.advance(seconds)
+
+        ownerSimulation.update(factoryMachineInputs())
+        ownerFrame = ownerSimulation.advance(seconds)
+
+        if (ownerFrame.activity == OwnerActivity.AWAITING_PAYMENT && cargoInTransitIds.isNotEmpty()) {
+            settleCargoDelivery(cargoInTransitIds)
+            cargoInTransitIds = emptyList()
+            ownerSimulation.paymentRecorded()
+            ownerFrame = ownerSimulation.snapshot()
+        }
+
+        factoryFrame = factoryFrame.copy(
+            owner = ownerFrame,
+            cargoInTransit = cargoInTransitIds,
+        )
     }
 
     fun boost10Minutes() {
         if (state.boostTokens <= 0) return notify("Você não possui impulsos de +10 min.")
         if (!WorkLifeRules.factoryOpen(state.shiftMode, currentTimeMillis())) {
-            return notify("Fábrica fechada no turno 12h. O expediente é 07:00–19:00.")
+            return notify("Fábrica fechada. No turno 12h o expediente é 07:00–19:00.")
         }
         if (production.operatingMachines <= 0) return notify("Nenhuma máquina está produzindo agora.")
 
@@ -108,71 +152,115 @@ class GameStore {
     }
 
     fun dailyBonus() {
-        val day = currentTimeMillis() / 86_400_000L
+        val now = currentTimeMillis()
+        val day = now / 86_400_000L
         if (state.lastDailyBonusDay == day) return notify("Bônus diário já recebido.")
-        val reward = 150_000L + state.company.companyLevel * 25_000L
+        val reward = max(150_000L, production.netPer10MinutesCents)
         state = state.copy(
             company = state.company.copy(cashCents = state.company.cashCents + reward),
-            boostTokens = state.boostTokens + 1,
+            boostTokens = state.boostTokens + DAILY_BOOST_TOKENS,
             lastDailyBonusDay = day,
             finances = addFinance(state.finances, "INCOME", "BONUS", reward, "Bônus diário"),
         )
-        notify("Bônus diário recebido: ${money(reward)} + 1 impulso.")
+        notify("Bônus diário: ${money(reward)} + $DAILY_BOOST_TOKENS impulsos.")
+        persist()
+    }
+
+    fun claimDailyGachaTicket() {
+        val day = currentTimeMillis() / 86_400_000L
+        if (state.expansion.lastDailyTicketDay == day) return notify("Ficha diária da roleta já coletada.")
+        state = state.copy(
+            expansion = state.expansion.copy(
+                gachaTickets = state.expansion.gachaTickets + 1,
+                lastDailyTicketDay = day,
+            )
+        )
+        notify("Ficha diária da Roleta Industrial coletada.")
+        persist()
+    }
+
+    fun settlePrecisionMinigame(score: Double) {
+        val now = currentTimeMillis()
+        if (now - state.lastMinigameAt < MINIGAME_COOLDOWN_MILLIS) {
+            return notify("O minigame ainda está em recarga.")
+        }
+        val safe = score.coerceIn(0.0, 1.0)
+        val baseCycle = max(80_000L, production.netPer10MinutesCents)
+        val reward = (baseCycle * (0.30 + safe * 0.70)).toLong()
+        val tokens = if (safe >= .82) 2 else 1
+        state = state.copy(
+            company = state.company.copy(cashCents = state.company.cashCents + reward),
+            boostTokens = state.boostTokens + tokens,
+            lastMinigameAt = now,
+            bestMinigameScore = max(state.bestMinigameScore, safe),
+            finances = addFinance(state.finances, "INCOME", "BONUS", reward, "Minigame de precisão"),
+        )
+        notify("Precisão ${(safe * 100).roundToInt()}% • ${money(reward)} • +$tokens impulso(s).")
         persist()
     }
 
     fun buySnack() {
-        val cost = EconomyBalance.TEAM_SNACK_COST_CENTS
-        if (state.company.cashCents < cost) return notify("Caixa insuficiente para o cento de salgados.")
+        if (state.company.cashCents < TEAM_SNACK_COST_CENTS) {
+            return notify("Caixa insuficiente para o cento de salgados.")
+        }
         state = state.copy(
-            company = state.company.copy(cashCents = state.company.cashCents - cost),
-            snackUntil = currentTimeMillis() + EconomyBalance.SNACK_IMMUNITY_MILLIS,
-            finances = addFinance(state.finances, "EXPENSE", "SALARY", cost, "Cento de salgados • foco da equipe por 8h"),
+            company = state.company.copy(cashCents = state.company.cashCents - TEAM_SNACK_COST_CENTS),
+            snackUntil = currentTimeMillis() + SNACK_IMMUNITY_MILLIS,
+            workforce = state.workforce.copy(
+                idleEmployeeId = null,
+                idleSinceAt = 0L,
+                idleUntilAt = 0L,
+            ),
+            finances = addFinance(
+                state.finances, "EXPENSE", "SALARY", TEAM_SNACK_COST_CENTS,
+                "Cento de salgados • foco da equipe por 8h"
+            ),
         )
-        notify("Equipe alimentada. Foco protegido por 8 horas.")
+        notify("Equipe alimentada. Celular/ociosidade bloqueados por 8 horas.")
+        persist()
+    }
+
+    fun reprimandIdleEmployee() {
+        val employee = idleEmployee ?: return notify("Ninguém está no celular agora.")
+        val now = currentTimeMillis()
+        state = state.copy(
+            workforce = state.workforce.copy(
+                idleEmployeeId = null,
+                idleSinceAt = 0L,
+                idleUntilAt = 0L,
+                nextIdleCheckAt = now + REPRIMAND_GRACE_MILLIS,
+            ),
+        )
+        notify("${employee.name} voltou ao posto. Nova tolerância por 1 hora.")
         persist()
     }
 
     fun startCargoDelivery() {
-        if (ownerActivity != OwnerActivity.IDLE) return
+        if (ownerFrame.busy || cargoInTransitIds.isNotEmpty()) return notify("O dono já está em uma entrega.")
         val ids = pendingCargo.map { it.id }
-        if (ids.isEmpty()) return notify("Não há carga pronta.")
-        deliveryIds = ids
-        deliveryStartedAt = currentTimeMillis()
-        ownerActivity = OwnerActivity.COLLECTING
-        notify("O dono foi buscar ${ids.size} carga(s).")
+        if (ids.isEmpty()) return notify("Não há carga pronta para expedição.")
+
+        ownerSimulation.update(factoryMachineInputs())
+        if (!ownerSimulation.start()) return
+        cargoInTransitIds = ids // snapshot: carga criada depois fica para a próxima viagem.
+        ownerFrame = ownerSimulation.snapshot()
+        notify("Expedição iniciada: ${ids.size} lote(s) nesta viagem.")
     }
 
-    private fun advanceOwner(now: Long) {
-        if (ownerActivity == OwnerActivity.IDLE || deliveryStartedAt <= 0L) return
-        val elapsed = now - deliveryStartedAt
-        ownerActivity = when {
-            elapsed < 1_200L -> OwnerActivity.COLLECTING
-            elapsed < 2_400L -> OwnerActivity.LOADING
-            elapsed < 4_200L -> OwnerActivity.DELIVERING
-            elapsed < 5_200L -> OwnerActivity.UNLOADING
-            else -> {
-                finishCargoDelivery()
-                OwnerActivity.RETURNING
-            }
-        }
-        if (elapsed >= 6_200L && ownerActivity == OwnerActivity.RETURNING) {
-            ownerActivity = OwnerActivity.IDLE
-            deliveryIds = emptyList()
-            deliveryStartedAt = 0L
-        }
-    }
-
-    private fun finishCargoDelivery() {
-        val selected = state.cargo.filter { it.id in deliveryIds && it.pending }
+    private fun settleCargoDelivery(ids: List<String>) {
+        val selected = state.cargo.filter { it.id in ids && it.pending }
         if (selected.isEmpty()) return
+
         val now = currentTimeMillis()
         val value = selected.sumOf { it.valueCents }
         val cycles = selected.sumOf { it.cycles }
-        val ids = selected.map { it.id }.toSet()
+        val selectedIds = selected.map { it.id }.toSet()
+
         state = state.copy(
             company = state.company.copy(cashCents = state.company.cashCents + value),
-            cargo = state.cargo.map { if (it.id in ids && it.pending) it.copy(deliveredAt = now) else it },
+            cargo = state.cargo.map {
+                if (it.id in selectedIds && it.pending) it.copy(deliveredAt = now) else it
+            },
             finances = addFinance(
                 state.finances,
                 "INCOME",
@@ -181,7 +269,7 @@ class GameStore {
                 "Entrega de carga • $cycles ciclo(s) de produção",
             ),
         )
-        notify("Carga entregue. ${money(value)} entrou no caixa.")
+        notify("Entrega concluída. ${money(value)} entrou no caixa.")
         persist()
     }
 
@@ -191,10 +279,7 @@ class GameStore {
         if (state.company.usedWarehouseSpace + def.space > state.company.warehouseSpace) {
             return notify("Espaço insuficiente no galpão.")
         }
-        val occupied = state.machines.map { it.gridX to it.gridY }.toSet()
-        val spot = (0..5).flatMap { y -> (0..4).map { x -> x to y } }.firstOrNull { it !in occupied }
-            ?: return notify("Não há posição livre no layout.")
-
+        val spot = freeGridPosition() ?: return notify("Não há posição livre no layout atual.")
         val machine = MachineSave(
             id = newId("machine"),
             machineType = def.type.name,
@@ -210,15 +295,15 @@ class GameStore {
             machines = state.machines + machine,
             finances = addFinance(state.finances, "EXPENSE", "MACHINE", def.priceCents, "Compra: ${def.name}"),
         )
-        notify("${def.name} instalada.")
-        persist()
+        notify("${def.name} instalada no chão de fábrica.")
+        persistAndRefresh()
     }
 
     fun repairMachine(id: String) {
         val machine = state.machines.firstOrNull { it.id == id } ?: return
         val def = MachineCatalog.byType(machine.machineType) ?: return
         val missing = (1000 - machine.condition).coerceAtLeast(0)
-        if (missing == 0) return notify("A máquina já está em condição máxima.")
+        if (missing == 0) return notify("A máquina já está em perfeito estado.")
         val cost = (def.maintenanceCents * missing / 1000L).coerceAtLeast(5_000L)
         if (state.company.cashCents < cost) return notify("Caixa insuficiente para manutenção.")
         state = state.copy(
@@ -227,7 +312,7 @@ class GameStore {
             finances = addFinance(state.finances, "EXPENSE", "MAINTENANCE", cost, "Manutenção: ${def.name}"),
         )
         notify("Manutenção concluída por ${money(cost)}.")
-        persist()
+        persistAndRefresh()
     }
 
     fun sellMachine(id: String) {
@@ -247,7 +332,7 @@ class GameStore {
             finances = addFinance(state.finances, "INCOME", "MACHINE", resale, "Revenda: ${def.name}"),
         )
         notify("${def.name} vendida por ${money(resale)}.")
-        persist()
+        persistAndRefresh()
     }
 
     fun moveMachineNext(id: String) {
@@ -255,30 +340,37 @@ class GameStore {
         val occupied = state.machines.filterNot { it.id == id }.map { it.gridX to it.gridY }.toSet()
         val all = (0..5).flatMap { y -> (0..4).map { x -> x to y } }
         val currentIndex = all.indexOf(machine.gridX to machine.gridY).coerceAtLeast(0)
-        val next = (1..all.size).map { all[(currentIndex + it) % all.size] }.firstOrNull { it !in occupied }
-            ?: return
-        state = state.copy(machines = state.machines.map {
-            if (it.id == id) it.copy(gridX = next.first, gridY = next.second) else it
-        })
-        persist()
+        val next = (1..all.size)
+            .map { all[(currentIndex + it) % all.size] }
+            .firstOrNull { it !in occupied } ?: return
+        state = state.copy(
+            machines = state.machines.map {
+                if (it.id == id) it.copy(gridX = next.first, gridY = next.second) else it
+            }
+        )
+        notify("Máquina movida para a próxima baia livre.")
+        persistAndRefresh()
     }
 
     fun hireEmployee() {
-        val random = Random(currentTimeMillis())
+        val random = Random(currentTimeMillis() + idCounter)
         val specialty = EmployeeSpecialty.values().random(random)
         val level = random.nextInt(1, 5)
         val salary = 180_000L + level * 65_000L
         if (state.company.cashCents < salary) return notify("Caixa insuficiente para a contratação.")
 
-        val first = listOf(
-            "Carlos", "Marcos", "João", "Rafael", "Bruno", "Diego", "André", "Paulo",
-            "Luciana", "Patrícia", "Camila", "Fernanda", "Amanda", "Juliana", "Mariana", "Beatriz",
-        ).random(random)
-        val last = listOf("Silva", "Santos", "Oliveira", "Souza", "Costa", "Ferreira", "Almeida", "Lima").random(random)
-        val traits = listOf("Cuidadoso", "Rápido", "Perfeccionista", "Distraído", "Casca grossa", "Elétrico")
+        val firstNames = listOf(
+            "Carlos", "Marcos", "João", "Rafael", "Bruno", "Diego", "André", "Paulo", "Felipe", "Ricardo",
+            "Luciana", "Patrícia", "Camila", "Fernanda", "Amanda", "Juliana", "Mariana", "Beatriz", "Renata",
+            "Larissa", "Daniela", "Aline", "Carolina", "Bianca", "Vanessa", "Jéssica", "Natália", "Priscila",
+            "Letícia", "Isabela",
+        )
+        val lastNames = listOf("Silva", "Oliveira", "Santos", "Souza", "Costa", "Ferreira", "Lima", "Rodrigues", "Almeida", "Gomes")
+        val traits = listOf("Rápido", "Perfeccionista", "Aprende rápido", "Econômico", "CNC especialista", "Distraído", "Falta muito", "Cuidadoso")
+
         val employee = EmployeeSave(
             id = newId("employee"),
-            name = "$first $last",
+            name = "${firstNames.random(random)} ${lastNames.random(random)}",
             specialty = specialty.name,
             skillLevel = level,
             salaryCents = salary,
@@ -288,69 +380,141 @@ class GameStore {
         state = state.copy(
             company = state.company.copy(cashCents = state.company.cashCents - salary),
             employees = state.employees + employee,
-            finances = addFinance(state.finances, "EXPENSE", "SALARY", salary, "Contratação: ${employee.name}"),
+            finances = addFinance(state.finances, "EXPENSE", "SALARY", salary, "Admissão e primeiro salário: ${employee.name}"),
         )
         notify("${employee.name} contratado.")
-        persist()
+        persistAndRefresh()
+    }
+
+    fun fireEmployee(id: String) {
+        val employee = state.employees.firstOrNull { it.id == id } ?: return
+        state = state.copy(
+            employees = state.employees.filterNot { it.id == id },
+            workforce = if (state.workforce.idleEmployeeId == id) {
+                state.workforce.copy(idleEmployeeId = null, idleSinceAt = 0L, idleUntilAt = 0L)
+            } else state.workforce,
+        )
+        notify("${employee.name} desligado da equipe.")
+        persistAndRefresh()
     }
 
     fun assignEmployeeNext(employeeId: String) {
         val employee = state.employees.firstOrNull { it.id == employeeId } ?: return
         if (state.machines.isEmpty()) return notify("Compre uma máquina antes.")
         val current = state.machines.indexOfFirst { it.id == employee.assignedMachineId }
-        val candidateOrder = (1..state.machines.size).map { state.machines[(current + it).mod(state.machines.size)] }
+        val candidateOrder = (1..state.machines.size).map {
+            state.machines[(current + it).mod(state.machines.size)]
+        }
         val target = candidateOrder.firstOrNull { machine ->
             state.employees.none { it.id != employeeId && it.assignedMachineId == machine.id }
         } ?: return notify("Todas as máquinas já possuem operador.")
 
-        state = state.copy(employees = state.employees.map {
-            if (it.id == employeeId) it.copy(assignedMachineId = target.id) else it
-        })
+        state = state.copy(
+            employees = state.employees.map {
+                if (it.id == employeeId) it.copy(assignedMachineId = target.id) else it
+            }
+        )
         notify("${employee.name} atribuído a ${machineName(target.machineType)}.")
-        persist()
+        persistAndRefresh()
+    }
+
+    fun unassignEmployee(employeeId: String) {
+        state = state.copy(
+            employees = state.employees.map {
+                if (it.id == employeeId) it.copy(assignedMachineId = null) else it
+            }
+        )
+        persistAndRefresh()
     }
 
     fun restEmployee(id: String) {
         val now = currentTimeMillis()
-        state = state.copy(employees = state.employees.map {
-            if (it.id == id) it.copy(restingUntil = now + REST_MILLIS) else it
-        })
+        state = state.copy(
+            employees = state.employees.map {
+                if (it.id == id) it.copy(restingUntil = now + REST_MILLIS) else it
+            },
+            workforce = if (state.workforce.idleEmployeeId == id) {
+                state.workforce.copy(idleEmployeeId = null, idleSinceAt = 0L, idleUntilAt = 0L)
+            } else state.workforce,
+        )
         notify("Funcionário enviado para a Copa por 1 hora.")
-        persist()
+        persistAndRefresh()
     }
 
     fun acceptContract(id: String) {
-        val c = state.contracts.firstOrNull { it.id == id } ?: return
-        if (c.status != "AVAILABLE") return
-        if (!contractAllowed(c)) return notify("Seu nível ainda não atende este contrato.")
+        val contract = state.contracts.firstOrNull { it.id == id } ?: return
+        if (contract.status != "AVAILABLE") return
+        if (!contractAllowed(contract)) return notify(contractLockReason(contract))
         val now = currentTimeMillis()
-        state = state.copy(contracts = state.contracts.map {
-            if (it.id == id) it.copy(status = "ACTIVE", startedAt = now) else it
-        })
-        notify("Contrato de ${c.clientName} aceito.")
+        state = state.copy(
+            contracts = state.contracts.map {
+                if (it.id == id) it.copy(status = "ACTIVE", startedAt = now) else it
+            }
+        )
+        notify("Contrato de ${contract.clientName} aceito.")
         persist()
     }
 
     fun cancelContract(id: String) {
-        val c = state.contracts.firstOrNull { it.id == id } ?: return
-        if (c.status != "ACTIVE") return
+        val contract = state.contracts.firstOrNull { it.id == id } ?: return
+        if (contract.status != "ACTIVE") return
         state = state.copy(
             company = state.company.copy(
-                cashCents = (state.company.cashCents - c.penaltyCents).coerceAtLeast(0L),
-                reputation = (state.company.reputation - c.reputationPenalty).coerceAtLeast(0),
+                cashCents = (state.company.cashCents - contract.penaltyCents).coerceAtLeast(0L),
+                reputation = (state.company.reputation - contract.reputationPenalty).coerceAtLeast(0),
             ),
-            contracts = state.contracts.map { if (it.id == id) it.copy(status = "CANCELLED") else it },
-            finances = addFinance(state.finances, "EXPENSE", "CONTRACT", c.penaltyCents, "Cancelamento: ${c.clientName}"),
+            contracts = state.contracts.map {
+                if (it.id == id) it.copy(status = "CANCELLED") else it
+            },
+            expansion = state.expansion.copy(
+                contractTools = state.expansion.contractTools - id
+            ),
+            finances = addFinance(
+                state.finances, "EXPENSE", "CONTRACT", contract.penaltyCents,
+                "Cancelamento: ${contract.clientName}"
+            ),
         )
         updateCompanyLevel()
-        notify("Contrato cancelado com multa de ${money(c.penaltyCents)}.")
+        notify("Contrato cancelado com multa de ${money(contract.penaltyCents)}.")
+        persist()
+    }
+
+    fun archiveContract(id: String) {
+        val status = state.contracts.firstOrNull { it.id == id }?.status ?: return
+        if (status !in setOf("COMPLETED", "FAILED", "CANCELLED")) return
+        state = state.copy(
+            contracts = state.contracts.filterNot { it.id == id },
+            expansion = state.expansion.copy(contractTools = state.expansion.contractTools - id),
+        )
+        ensureContracts()
+        persist()
+    }
+
+    fun bindTool(contractId: String, toolId: String?) {
+        val contract = state.contracts.firstOrNull { it.id == contractId } ?: return
+        if (contract.status !in setOf("AVAILABLE", "ACTIVE")) return
+
+        val bindings = state.expansion.contractTools.toMutableMap()
+        if (toolId == null) {
+            bindings.remove(contractId)
+        } else {
+            val tool = GameProgression.tools.firstOrNull { it.id == toolId }
+                ?: return notify("Ferramenta inválida.")
+            val inventory = state.expansion.tools[toolId] ?: 0
+            val reservedElsewhere = bindings.count { (cid, tid) -> cid != contractId && tid == toolId }
+            if (inventory <= reservedElsewhere) return notify("Todas as unidades de ${tool.name} já estão reservadas.")
+            bindings[contractId] = toolId
+        }
+        state = state.copy(expansion = state.expansion.copy(contractTools = bindings))
         persist()
     }
 
     fun expandWarehouse() {
         val currentLevel = ((state.company.warehouseSpace - 100) / 50) + 1
         val cost = 2_000_000L * currentLevel
-        if (state.company.cashCents < cost) return notify("Faltam ${money(cost - state.company.cashCents)} para ampliar.")
+        if (state.company.cashCents < cost) {
+            return notify("Faltam ${money(cost - state.company.cashCents)} para ampliar.")
+        }
         state = state.copy(
             company = state.company.copy(
                 cashCents = state.company.cashCents - cost,
@@ -364,30 +528,38 @@ class GameStore {
 
     fun claimGoal(id: String) {
         val goal = state.goals.firstOrNull { it.id == id } ?: return
-        if (goal.claimed) return
+        if (goal.claimed) return notify("Recompensa já coletada.")
         val progress = goalProgress(goal)
         if (progress < goal.target) return notify("Meta ainda não concluída.")
         state = state.copy(
             company = state.company.copy(cashCents = state.company.cashCents + goal.rewardCents),
             goals = state.goals.map { if (it.id == id) it.copy(claimed = true) else it },
-            finances = addFinance(state.finances, "INCOME", "BONUS", goal.rewardCents, "Meta: ${goal.title}"),
+            expansion = state.expansion.copy(
+                gachaTickets = state.expansion.gachaTickets + goal.ticketReward
+            ),
+            finances = addFinance(state.finances, "INCOME", "BONUS", goal.rewardCents, "Recompensa de meta: ${goal.title}"),
         )
-        notify("Meta resgatada: ${money(goal.rewardCents)}.")
+        notify(
+            "Meta resgatada: ${money(goal.rewardCents)}" +
+                if (goal.ticketReward > 0) " + ${goal.ticketReward} ficha(s)." else "."
+        )
         persist()
     }
 
     fun goalProgress(goal: GoalSave): Int = when (goal.id) {
-        "first_employee" -> state.employees.size
-        "three_machines" -> state.machines.size
-        "reputation_10" -> state.company.reputation
-        "warehouse_150" -> state.company.warehouseSpace
+        "first_employee" -> if (state.employees.isNotEmpty()) 1 else 0
+        "three_machines", "ten_machines", "twenty_machines", "thirty_machines" -> state.machines.size
+        "fifteen_employees", "thirty_employees" -> state.employees.size
+        "reputation_10", "reputation_100", "reputation_250", "reputation_500" -> state.company.reputation
+        "company_level_10", "company_level_20" -> state.company.companyLevel
+        "warehouse_150", "warehouse_300", "warehouse_500" -> state.company.warehouseSpace
         else -> 0
     }
 
     fun setShift(mode: ShiftMode) {
         state = state.copy(shiftMode = mode)
         notify(if (mode == ShiftMode.DAY_12H) "Turno 07:00–19:00 ativado." else "Operação 24 horas ativada.")
-        persist()
+        persistAndRefresh()
     }
 
     fun setSpecialty(code: String) {
@@ -395,7 +567,7 @@ class GameStore {
         if (state.company.companyLevel < def.minLevel) return notify("Nível ${def.minLevel} necessário.")
         state = state.copy(expansion = state.expansion.copy(specialty = code))
         notify("Especialização: ${def.label}.")
-        persist()
+        persistAndRefresh()
     }
 
     fun unlockCompanySkill(id: String) {
@@ -409,7 +581,7 @@ class GameStore {
         }
         state = state.copy(expansion = state.expansion.copy(companySkills = state.expansion.companySkills + id))
         notify("${def.name} desbloqueada.")
-        persist()
+        persistAndRefresh()
     }
 
     fun unlockPlayerSkill(id: String) {
@@ -423,53 +595,101 @@ class GameStore {
         }
         state = state.copy(expansion = state.expansion.copy(playerSkills = state.expansion.playerSkills + id))
         notify("${def.name} desbloqueada.")
-        persist()
+        persistAndRefresh()
+    }
+
+    fun buyPremiumMachine(id: String) {
+        val def = GameProgression.premiumMachines.firstOrNull { it.id == id }
+            ?: return notify("Máquina premium inválida.")
+        if (state.company.companyLevel < def.minLevel) return notify("Nível ${def.minLevel} necessário.")
+        if (id in state.expansion.premiumMachines) return notify("Máquina premium já adquirida.")
+        if (state.company.cashCents < def.priceCents) return notify("Caixa insuficiente.")
+
+        state = state.copy(
+            company = state.company.copy(cashCents = state.company.cashCents - def.priceCents),
+            expansion = state.expansion.copy(premiumMachines = state.expansion.premiumMachines + id),
+            finances = addFinance(state.finances, "EXPENSE", "MACHINE", def.priceCents, "Máquina premium: ${def.name}"),
+        )
+        notify("${def.name} adicionada à célula premium.")
+        persistAndRefresh()
     }
 
     fun spinGacha() {
-        if (state.expansion.gachaTickets <= 0) return notify("Sem fichas para a Roleta Industrial.")
-        val random = Random(currentTimeMillis())
-        val candidates = buildList {
-            addAll(GameProgression.tools.filter { it.id !in listOf("broca_madeira", "ferramenta_soldada") }.map { "tool:${it.id}:${it.name}" })
-            addAll(GameProgression.skins.filter { it.minLevel <= state.company.companyLevel + 6 }.map { "skin:${it.id}:${it.name}" })
-            addAll(GameProgression.characters.filter { it.minLevel <= state.company.companyLevel + 6 }.map { "character:${it.id}:${it.name}" })
+        if (state.expansion.gachaTickets <= 0) return notify("Você não tem fichas da roleta.")
+        val random = Random(currentTimeMillis() + idCounter)
+        val epicPity = state.expansion.pityEpic + 1
+        val legendaryPity = state.expansion.pityLegendary + 1
+        val forcedLegendary = legendaryPity >= 80
+        val forcedEpic = epicPity >= 30
+        val roll = random.nextInt(10_000)
+
+        val reward = when {
+            forcedLegendary -> gachaByMinimumRarity(RarityDef.LEGENDARY, random)
+            forcedEpic -> gachaByMinimumRarity(RarityDef.EPIC, random)
+            roll < 80 -> gachaByMinimumRarity(RarityDef.LEGENDARY, random) // 0,8%
+            roll < 450 -> gachaByMinimumRarity(RarityDef.EPIC, random)     // +3,7%
+            roll < 1_050 -> randomPremiumMachine(random)                    // +6,0%
+            roll < 2_250 -> randomCharacter(random)                         // +12%
+            roll < 4_050 -> randomSkin(random)                              // +18%
+            roll < 6_450 -> randomTool(RarityDef.RARE, random)              // +24%
+            else -> randomTool(RarityDef.COMMON, random)                    // restante; ficha nunca é prêmio
         }
-        val reward = candidates.random(random)
-        val parts = reward.split(':', limit = 3)
-        var exp = state.expansion.copy(gachaTickets = state.expansion.gachaTickets - 1)
-        when (parts[0]) {
-            "tool" -> exp = exp.copy(tools = exp.tools + (parts[1] to ((exp.tools[parts[1]] ?: 0) + 1)))
-            "skin" -> {
-                if (parts[1] in exp.ownedSkins) {
-                    val tool = GameProgression.tools.random(random)
-                    exp = exp.copy(tools = exp.tools + (tool.id to ((exp.tools[tool.id] ?: 0) + 1)))
-                } else exp = exp.copy(ownedSkins = exp.ownedSkins + parts[1])
-            }
-            "character" -> {
-                if (parts[1] in exp.ownedCharacters) {
-                    val tool = GameProgression.tools.random(random)
-                    exp = exp.copy(tools = exp.tools + (tool.id to ((exp.tools[tool.id] ?: 0) + 1)))
-                } else exp = exp.copy(ownedCharacters = exp.ownedCharacters + parts[1])
-            }
-        }
-        state = state.copy(expansion = exp)
-        notify("Roleta: ${parts.getOrElse(2) { "recompensa industrial" }}.")
-        persist()
+
+        var expansion = applyGachaReward(state.expansion, reward)
+        expansion = expansion.copy(
+            gachaTickets = (expansion.gachaTickets - 1).coerceAtLeast(0),
+            pityLegendary = if (reward.rarity == RarityDef.LEGENDARY) 0 else legendaryPity,
+            pityEpic = if (reward.rarity.rank >= RarityDef.EPIC.rank) 0 else epicPity,
+        )
+        state = state.copy(expansion = expansion)
+        lastGachaReward = reward
+        notify("Roleta • ${reward.rarity.label}: ${reward.title}")
+        persistAndRefresh()
     }
 
     fun equipSkin(id: String) {
-        if (id !in state.expansion.ownedSkins) return
-        state = state.copy(expansion = state.expansion.copy(equippedSkin = id))
+        if (id !in state.expansion.ownedSkins) return notify("Skin ainda não obtida.")
+        val visualStyle = when (id) {
+            "princesa", "princesa_dourada" -> "PRINCESA"
+            "pinoquio" -> "PINOQUIO"
+            "tatuzao" -> "TATUZAO"
+            "magrao" -> "MAGRAO"
+            "kendao" -> "KENDAO_KIMONO"
+            else -> state.profile.skinStyle
+        }
+        state = state.copy(
+            expansion = state.expansion.copy(equippedSkin = id),
+            profile = state.profile.copy(skinStyle = visualStyle),
+        )
+        persistAndRefresh()
+    }
+
+    fun equipCharacter(id: String?) {
+        if (id != null && id !in state.expansion.ownedCharacters) return notify("Personagem ainda não obtido.")
+        state = state.copy(expansion = state.expansion.copy(equippedCharacter = id))
+        persistAndRefresh()
+    }
+
+    fun updateProfile(profile: PlayerProfileSave) {
+        state = state.copy(profile = profile.copy(onboardingComplete = true))
+        persistAndRefresh()
+    }
+
+    fun updateUiSettings(settings: UiSettingsSave) {
+        state = state.copy(uiSettings = settings.copy(legendarySpeechSeconds = settings.legendarySpeechSeconds.coerceIn(2, 12)))
         persist()
     }
 
     fun resetSave() {
         PlatformSaveStorage.remove(SAVE_KEY)
         state = createInitial()
-        ownerActivity = OwnerActivity.IDLE
-        deliveryIds = emptyList()
+        cargoInTransitIds = emptyList()
+        ownerSimulation.cancel()
+        ownerFrame = ownerSimulation.snapshot()
+        factoryFrame = FactoryFrame()
         normalizeAndPersist()
         ensureContracts()
+        refreshFactoryInput()
         notify("Novo jogo iniciado.")
     }
 
@@ -481,8 +701,9 @@ class GameStore {
         val settled = (capped / CYCLE_MILLIS) * CYCLE_MILLIS
         if (settled >= CYCLE_MILLIS) {
             simulateSettled(settled, now, advanceClock = true)
-            val staged = pendingCargoCents
-            if (staged > 0) notify("Produção offline fechada. Carga pronta: ${money(staged)}.")
+            if (pendingCargoCents > 0) {
+                notify("Produção offline fechada. CARGA pronta: ${money(pendingCargoCents)}.")
+            }
         }
     }
 
@@ -499,16 +720,17 @@ class GameStore {
         repeat(cycles.toInt().coerceAtMost(144)) { index ->
             val cycleEnd = cursor + CYCLE_MILLIS
             val open = WorkLifeRules.factoryOpen(working.shiftMode, cycleEnd)
-
-            if (!open) {
-                working = working.copy(
-                    employees = working.employees.map { WorkLifeRules.afterRest(it, 10) },
+            working = if (!open) {
+                working.copy(
+                    employees = working.employees.map {
+                        WorkLifeRules.afterClosedShift(it, 10)
+                    },
                     contracts = working.contracts.map {
                         if (it.status == "ACTIVE") it.copy(deadlineAt = it.deadlineAt + CYCLE_MILLIS) else it
                     },
                 )
             } else {
-                working = simulateOpenCycle(working, cycleEnd, boost && index == 0)
+                simulateOpenCycle(working, cycleEnd, boost && index == 0)
             }
             cursor = cycleEnd
         }
@@ -519,6 +741,7 @@ class GameStore {
         }
         state = working
         updateCompanyLevel()
+        normalizeUnlockedSkins()
         persist()
     }
 
@@ -537,19 +760,29 @@ class GameStore {
             for (i in contracts.indices) {
                 val contract = contracts[i]
                 if (contract.status != "ACTIVE" || productionMilli <= 0L) continue
-                val targetMilli = contract.quantity * 1000L
-                val current = contract.productionProgressMilli.coerceAtMost(targetMilli)
-                val needed = (targetMilli - current).coerceAtLeast(0L)
-                val qualityGap = contract.requiredQuality - snapshot.averageQuality
+
+                val toolEffect = GameProgression.toolEffect(expansion, contract.id)
+                val effectiveQuality = snapshot.averageQuality + toolEffect.qualityBonus
+                val qualityGap = contract.requiredQuality - effectiveQuality
                 val qualityFactor = when {
                     qualityGap <= 0 -> 1.0
                     qualityGap <= 10 -> .70
                     else -> .30
                 }
-                val applied = min((productionMilli * qualityFactor).toLong(), needed)
-                val consumed = if (qualityFactor <= 0.0) productionMilli else ceil(applied / qualityFactor).toLong()
+                val effectiveFactor = qualityFactor * toolEffect.speedMultiplier
+
+                val targetMilli = contract.quantity * 1000L
+                val current = contract.productionProgressMilli.coerceAtMost(targetMilli)
+                val needed = (targetMilli - current).coerceAtLeast(0L)
+                val acceptedAvailable = (productionMilli * effectiveFactor).toLong().coerceAtLeast(0L)
+                val applied = min(acceptedAvailable, needed)
+                val rawConsumed = if (effectiveFactor <= 0.0) {
+                    productionMilli
+                } else {
+                    ceil(applied / effectiveFactor).toLong()
+                }
                 val next = current + applied
-                productionMilli = (productionMilli - consumed).coerceAtLeast(0L)
+                productionMilli = (productionMilli - rawConsumed).coerceAtLeast(0L)
 
                 if (next >= targetMilli) {
                     val alreadyPaid = contract.rewardPaid
@@ -564,15 +797,14 @@ class GameStore {
                             cashCents = company.cashCents + contract.rewardCents,
                             reputation = company.reputation + contract.reputationReward,
                         )
-                        expansion = expansion.copy(playerXp = expansion.playerXp + contract.difficulty * 120L + contract.requiredQuality)
-                        finances = addFinance(
-                            finances,
-                            "INCOME",
-                            "CONTRACT",
-                            contract.rewardCents,
-                            "Contrato concluído: ${contract.clientName}",
-                            eventTime,
+                        expansion = expansion.copy(
+                            playerXp = expansion.playerXp + contract.difficulty * 120L + contract.requiredQuality
                         )
+                        finances = addFinance(
+                            finances, "INCOME", "CONTRACT", contract.rewardCents,
+                            "Contrato concluído: ${contract.clientName}", eventTime
+                        )
+                        expansion = consumeBoundTool(expansion, contract.id)
                     }
                 } else {
                     contracts[i] = contract.copy(
@@ -583,10 +815,8 @@ class GameStore {
             }
         }
 
-        var machines = working.machines
-        var employees = working.employees
         val operatingIds = snapshot.machineProduction.filter { it.isOperating }.map { it.machineId }.toSet()
-        machines = machines.map { machine ->
+        val machines = working.machines.map { machine ->
             if (machine.id !in operatingIds) machine else {
                 val newMinutes = machine.accumulatedWorkMinutes + 10L
                 val wearBefore = machine.accumulatedWorkMinutes / 20L
@@ -597,13 +827,23 @@ class GameStore {
                 )
             }
         }
-        employees = employees.map { employee ->
-            if (employee.assignedMachineId !in operatingIds) {
-                if (WorkLifeRules.resting(employee, eventTime)) WorkLifeRules.afterRest(employee, 10) else employee
-            } else {
-                val newExperience = employee.experience + 10L
-                val skill = (1 + (newExperience / 480L).toInt()).coerceIn(employee.skillLevel, 10)
-                WorkLifeRules.afterWorked(employee.copy(experience = newExperience, skillLevel = skill), 10, working.shiftMode)
+
+        val employees = working.employees.map { employee ->
+            when {
+                WorkLifeRules.resting(employee, eventTime) -> WorkLifeRules.afterRest(employee, 10)
+                employee.assignedMachineId in operatingIds -> {
+                    val newExperience = employee.experience + 10L
+                    val skill = (1 + (newExperience / 480L).toInt()).coerceIn(employee.skillLevel, 10)
+                    WorkLifeRules.afterWorked(
+                        employee.copy(experience = newExperience, skillLevel = skill),
+                        10, working.shiftMode
+                    )
+                }
+                else -> WorkLifeRules.advanceFatigue(
+                    employee, assigned = false,
+                    continuous = working.shiftMode == ShiftMode.CONTINUOUS_24H,
+                    workHours = 10.0 / 60.0, pausedHours = 0.0, restHours = 0.0,
+                )
             }
         }
 
@@ -614,13 +854,10 @@ class GameStore {
                 penalty += contract.penaltyCents
                 reputationLoss += contract.reputationPenalty
                 finances = addFinance(
-                    finances,
-                    "EXPENSE",
-                    "CONTRACT",
-                    contract.penaltyCents,
-                    "Multa por atraso: ${contract.clientName}",
-                    eventTime,
+                    finances, "EXPENSE", "CONTRACT", contract.penaltyCents,
+                    "Multa por atraso: ${contract.clientName}", eventTime
                 )
+                expansion = expansion.copy(contractTools = expansion.contractTools - contract.id)
                 contract.copy(status = "FAILED")
             } else contract
         }.toMutableList()
@@ -645,16 +882,16 @@ class GameStore {
             machines = machines,
             employees = employees,
             contracts = contracts,
-            cargo = cargo,
+            cargo = cargo.takeLast(300),
             finances = finances,
             expansion = expansion,
         )
     }
 
     private fun calculateProduction(now: Long, save: GameSave = state): ProductionSnapshot {
-        if (!WorkLifeRules.factoryOpen(save.shiftMode, now)) return ProductionSnapshot(
-            idleMachines = save.machines.count { it.installed }
-        )
+        if (!WorkLifeRules.factoryOpen(save.shiftMode, now)) {
+            return ProductionSnapshot(idleMachines = save.machines.count { it.installed })
+        }
 
         val machineRuntime = save.machines.filter { it.installed }.map {
             MachineRuntime(it.id, it.machineType, it.level, it.condition)
@@ -673,10 +910,17 @@ class GameStore {
                 )
             }
 
+        val idleIds = if (save.snackUntil > now) {
+            emptySet()
+        } else {
+            save.workforce.idleEmployeeId?.takeIf { save.workforce.idleUntilAt > now }?.let(::setOf)
+                ?: emptySet()
+        }
+
         val base = ProductionEngine.calculate(
             machines = machineRuntime,
             employees = employeeRuntime,
-            idleEmployeeIds = emptySet(),
+            idleEmployeeIds = idleIds,
             modifiers = GameProgression.modifiers(save.expansion),
         )
 
@@ -686,7 +930,9 @@ class GameStore {
             mp.copy(unitsPerHour = mp.unitsPerHour * efficiency)
         }
         val adjustedUnits = adjustedMachines.filter { it.isOperating }.sumOf { it.unitsPerHour }
-        val ratio = if (base.totalUnitsPerHour > 0.0) (adjustedUnits / base.totalUnitsPerHour).coerceIn(0.0, 1.0) else 0.0
+        val ratio = if (base.totalUnitsPerHour > 0.0) {
+            (adjustedUnits / base.totalUnitsPerHour).coerceIn(0.0, 1.0)
+        } else 0.0
         val gross = (base.grossPerHourCents * ratio).toLong()
         return base.copy(
             totalUnitsPerHour = adjustedUnits,
@@ -696,65 +942,305 @@ class GameStore {
         )
     }
 
-    private fun ensureContracts() {
-        val available = state.contracts.count { it.status == "AVAILABLE" && contractAllowed(it) }
-        if (available >= 5) return
-        val newContracts = state.contracts.toMutableList()
-        repeat(5 - available) { newContracts += generateContract() }
-        state = state.copy(contracts = newContracts)
+    private fun refreshFactoryInput() {
+        factorySimulation.update(
+            FactoryInput(
+                machines = factoryMachineInputs(),
+                workers = factoryWorkerInputs(),
+                open = WorkLifeRules.factoryOpen(state.shiftMode, currentTimeMillis()),
+                cycleStartedAt = state.company.lastSimulationAt,
+            )
+        )
+        ownerSimulation.update(factoryMachineInputs())
+        factoryFrame = factorySimulation.snapshot().copy(
+            owner = ownerSimulation.snapshot(),
+            cargoInTransit = cargoInTransitIds,
+        )
+        ownerFrame = ownerSimulation.snapshot()
+    }
+
+    private fun factoryMachineInputs(): List<FactoryMachineInput> {
+        val p = calculateProduction(currentTimeMillis())
+        return state.machines.map { machine ->
+            val mp = p.machineProduction.firstOrNull { it.machineId == machine.id }
+            FactoryMachineInput(
+                id = machine.id,
+                gridX = machine.gridX,
+                gridY = machine.gridY,
+                installed = machine.installed,
+                condition = machine.condition,
+                productive = mp?.isOperating == true,
+                unitsPerHour = mp?.unitsPerHour ?: 0.0,
+            )
+        }
+    }
+
+    private fun factoryWorkerInputs(): List<FactoryWorkerInput> {
+        val now = currentTimeMillis()
+        return state.employees.map { employee ->
+            FactoryWorkerInput(
+                id = employee.id,
+                machineId = employee.assignedMachineId,
+                skill = employee.skillLevel,
+                fatigue = employee.fatigue.roundToInt(),
+                resting = WorkLifeRules.resting(employee, now),
+                onPhone = state.snackUntil <= now &&
+                    state.workforce.idleEmployeeId == employee.id &&
+                    state.workforce.idleUntilAt > now,
+            )
+        }
+    }
+
+    private fun updateIdleDiscipline(now: Long) {
+        var workforce = state.workforce
+
+        if (state.snackUntil > now) {
+            if (workforce.idleEmployeeId != null) {
+                workforce = workforce.copy(idleEmployeeId = null, idleSinceAt = 0L, idleUntilAt = 0L)
+                state = state.copy(workforce = workforce)
+                persist()
+            }
+            return
+        }
+
+        if (workforce.idleEmployeeId != null && now >= workforce.idleUntilAt) {
+            workforce = workforce.copy(
+                idleEmployeeId = null,
+                idleSinceAt = 0L,
+                idleUntilAt = 0L,
+                nextIdleCheckAt = randomIdleCheckAt(now),
+            )
+            state = state.copy(workforce = workforce)
+            persist()
+            return
+        }
+
+        if (workforce.idleEmployeeId != null) return
+
+        if (workforce.nextIdleCheckAt <= 0L) {
+            state = state.copy(workforce = workforce.copy(nextIdleCheckAt = randomIdleCheckAt(now)))
+            persist()
+            return
+        }
+
+        if (now < workforce.nextIdleCheckAt) return
+
+        val random = Random(now + idCounter)
+        val candidates = state.employees.filter {
+            it.assignedMachineId != null && !WorkLifeRules.resting(it, now)
+        }
+        val nextCheck = randomIdleCheckAt(now)
+
+        if (candidates.isEmpty() || random.nextInt(100) >= IDLE_EVENT_CHANCE_PERCENT) {
+            state = state.copy(workforce = workforce.copy(nextIdleCheckAt = nextCheck))
+            persist()
+            return
+        }
+
+        val weighted = candidates.flatMap { employee ->
+            val weight = when {
+                employee.trait == "Distraído" -> 4
+                employee.trait == "Falta muito" -> 3
+                employee.morale < 55 -> 3
+                employee.morale < 75 -> 2
+                employee.trait == "Perfeccionista" || employee.trait == "Cuidadoso" -> 1
+                else -> 1
+            }
+            List(weight) { employee }
+        }
+        val chosen = weighted.random(random)
+        val duration = random.nextLong(2L * 60L * 1000L, EMPLOYEE_IDLE_MAX_MILLIS + 1L)
+        state = state.copy(
+            workforce = WorkforceSave(
+                idleEmployeeId = chosen.id,
+                idleSinceAt = now,
+                idleUntilAt = now + duration,
+                nextIdleCheckAt = nextCheck,
+            )
+        )
+        notify("${chosen.name} pegou o celular no meio do expediente.")
         persist()
     }
 
-    private fun generateContract(): ContractSave {
-        val now = currentTimeMillis()
-        val random = Random(now + idCounter)
-        val clients = listOf("Metalúrgica Horizonte", "AutoPeças Brasil", "AgroMec", "Hidráulica Forte", "AçoSul", "TecnoBombas")
-        val types = listOf("Peça unitária", "Lote pequeno", "Lote médio", "Retrabalho", "Estrutura metálica")
-        val maxDifficulty = when {
-            state.company.companyLevel >= 10 -> 5
-            state.company.companyLevel >= 7 -> 4
-            state.company.companyLevel >= 4 -> 3
-            state.company.companyLevel >= 2 -> 2
-            else -> 1
+    private fun randomIdleCheckAt(now: Long): Long {
+        val random = Random(now + idCounter++)
+        return now + random.nextLong(IDLE_CHECK_MIN_MILLIS, IDLE_CHECK_MAX_MILLIS + 1L)
+    }
+
+    private fun ensureContracts() {
+        val level = state.company.companyLevel
+        val target = when {
+            level >= 10 -> 9
+            level >= 7 -> 8
+            level >= 4 -> 7
+            level >= 2 -> 6
+            else -> 5
         }
-        val difficulty = random.nextInt(1, maxDifficulty + 1)
-        val qty = random.nextInt(4, 30) * difficulty
-        val reward = 350_000L + difficulty * 250_000L + qty * 12_000L
+        val available = state.contracts.count { it.status == "AVAILABLE" && contractAllowed(it) }
+        val missing = (target - available).coerceAtLeast(0)
+        if (missing == 0) return
+        val next = state.contracts.toMutableList()
+        repeat(missing) { next += generateContract(forceHigh = it < 2) }
+        state = state.copy(contracts = next)
+        persist()
+    }
+
+    private fun generateContract(forceHigh: Boolean): ContractSave {
+        val now = currentTimeMillis()
+        val random = Random(now + idCounter++)
+        val clients = listOf(
+            "Metalúrgica Horizonte", "AutoPeças Brasil", "AgroMec", "Hidráulica Forte",
+            "AçoSul", "TecnoBombas", "AeroMec", "MinasTech", "Ferrovia Sul", "Precision Parts",
+        )
+        val normalTypes = listOf(
+            "Peça unitária", "Lote pequeno", "Lote médio", "Retrabalho",
+            "Eixo e flange", "Dispositivo industrial",
+        )
+        val specialTypes = listOf(
+            "Protótipo crítico", "Lote urgente", "Peça aeroespacial",
+            "Recuperação de emergência", "Tolerância extrema",
+        )
+
+        val allowed = (1..5).filter { difficultyAllowed(it) }
+        val difficulty = if (forceHigh) allowed.maxOrNull() ?: 1 else allowed.random(random)
+        val specialChance = (5 + state.company.companyLevel * 2).coerceAtMost(25)
+        val special = random.nextInt(100) < specialChance
+        val qtyUpper = (18 + state.company.companyLevel * 2).coerceAtMost(70)
+        val qty = random.nextInt(5, max(6, qtyUpper + 1)) * difficulty
+        val requiredQuality = (43 + difficulty * 9 + if (special) 7 else 0).coerceAtMost(98)
+        val reward = (
+            320_000L +
+                difficulty * 280_000L +
+                qty * 13_000L +
+                if (special) 650_000L + difficulty * 180_000L else 0L
+            )
+        val hours = if (special) 5L + difficulty * 2L else 8L + difficulty * 3L
         return ContractSave(
             id = newId("contract"),
             clientName = clients.random(random),
-            type = types.random(random),
+            type = (if (special) specialTypes else normalTypes).random(random),
             quantity = qty,
             difficulty = difficulty,
-            requiredQuality = 45 + difficulty * 9,
+            requiredQuality = requiredQuality,
             rewardCents = reward,
-            penaltyCents = reward / 4L,
-            reputationReward = difficulty * 2,
-            reputationPenalty = difficulty,
+            penaltyCents = reward / if (special) 3L else 4L,
+            reputationReward = difficulty * 2 + if (special) difficulty else 0,
+            reputationPenalty = difficulty + if (special) 1 else 0,
             generatedAt = now,
-            deadlineAt = now + (6L + difficulty * 3L) * 60L * 60L * 1000L,
+            deadlineAt = now + hours * 60L * 60L * 1000L,
+            special = special,
         )
     }
 
-    private fun contractAllowed(c: ContractSave): Boolean {
-        val minLevel = when (c.difficulty.coerceIn(1, 5)) {
-            1 -> 1
-            2 -> 2
-            3 -> 4
-            4 -> 7
-            else -> 10
-        }
-        val skillNeed = when (c.difficulty.coerceIn(1, 5)) {
-            3 -> 1
-            4 -> 2
-            5 -> 3
-            else -> 0
-        }
-        val specialtyNeeded = c.difficulty >= 5
+    private fun difficultyAllowed(difficulty: Int): Boolean {
+        val (minLevel, minSkills, specialtyRequired) = GameProgression.contractGate(difficulty)
+        val commercialBonus = if ("comercial" in state.expansion.companySkills) 1 else 0
         return state.company.companyLevel >= minLevel &&
-            state.expansion.companySkills.size >= skillNeed &&
-            (!specialtyNeeded || state.expansion.specialty != "generalista")
+            state.expansion.companySkills.size + commercialBonus >= minSkills &&
+            (!specialtyRequired || state.expansion.specialty != "generalista")
     }
+
+    private fun contractAllowed(contract: ContractSave): Boolean = difficultyAllowed(contract.difficulty)
+
+    fun contractLockReason(contract: ContractSave): String {
+        val (minLevel, minSkills, specialtyRequired) = GameProgression.contractGate(contract.difficulty)
+        if (state.company.companyLevel < minLevel) return "Exige nível $minLevel da empresa."
+        val commercialBonus = if ("comercial" in state.expansion.companySkills) 1 else 0
+        if (state.expansion.companySkills.size + commercialBonus < minSkills) {
+            return "Exige $minSkills skill(s) da empresa."
+        }
+        if (specialtyRequired && state.expansion.specialty == "generalista") {
+            return "Defina uma especialidade para contratos nível máximo."
+        }
+        return "Disponível"
+    }
+
+    private fun consumeBoundTool(expansion: ExpansionSave, contractId: String): ExpansionSave {
+        val toolId = expansion.contractTools[contractId] ?: return expansion
+        val counts = expansion.tools.toMutableMap()
+        val next = ((counts[toolId] ?: 0) - 1).coerceAtLeast(0)
+        if (next == 0) counts.remove(toolId) else counts[toolId] = next
+        return expansion.copy(
+            tools = counts,
+            contractTools = expansion.contractTools - contractId,
+        )
+    }
+
+    private fun randomSkin(random: Random): GachaRewardDef {
+        val pool = GameProgression.skins.filter {
+            it.gachaOnly &&
+                it.minLevel <= state.company.companyLevel + 5 &&
+                it.id !in state.expansion.ownedSkins
+        }
+        if (pool.isEmpty()) return randomTool(RarityDef.RARE, random)
+        val def = pool.random(random)
+        return GachaRewardDef("skin", def.id, def.name, def.rarity)
+    }
+
+    private fun randomCharacter(random: Random): GachaRewardDef {
+        val pool = GameProgression.characters.filter {
+            it.minLevel <= state.company.companyLevel + 5 &&
+                it.id !in state.expansion.ownedCharacters
+        }
+        if (pool.isEmpty()) return randomTool(RarityDef.RARE, random)
+        val def = pool.random(random)
+        return GachaRewardDef("character", def.id, def.name, def.rarity)
+    }
+
+    private fun randomPremiumMachine(random: Random): GachaRewardDef {
+        val pool = GameProgression.premiumMachines.filter {
+            it.minLevel <= state.company.companyLevel + 6 &&
+                it.id !in state.expansion.premiumMachines
+        }
+        if (pool.isEmpty()) return randomTool(RarityDef.EPIC, random)
+        val def = pool.random(random)
+        return GachaRewardDef("premium_machine", def.id, def.name, def.rarity)
+    }
+
+    private fun randomTool(minRarity: RarityDef, random: Random): GachaRewardDef {
+        val pool = GameProgression.tools.filter { it.rarity.rank >= minRarity.rank }
+            .ifEmpty { GameProgression.tools }
+        val def = pool.random(random)
+        return GachaRewardDef("tool", def.id, def.name, def.rarity)
+    }
+
+    private fun gachaByMinimumRarity(minRarity: RarityDef, random: Random): GachaRewardDef {
+        val candidates = buildList<GachaRewardDef> {
+            GameProgression.skins.filter {
+                it.gachaOnly && it.rarity.rank >= minRarity.rank &&
+                    it.minLevel <= state.company.companyLevel + 6 &&
+                    it.id !in state.expansion.ownedSkins
+            }.forEach { add(GachaRewardDef("skin", it.id, it.name, it.rarity)) }
+
+            GameProgression.characters.filter {
+                it.rarity.rank >= minRarity.rank &&
+                    it.minLevel <= state.company.companyLevel + 6 &&
+                    it.id !in state.expansion.ownedCharacters
+            }.forEach { add(GachaRewardDef("character", it.id, it.name, it.rarity)) }
+
+            GameProgression.premiumMachines.filter {
+                it.rarity.rank >= minRarity.rank &&
+                    it.minLevel <= state.company.companyLevel + 6 &&
+                    it.id !in state.expansion.premiumMachines
+            }.forEach { add(GachaRewardDef("premium_machine", it.id, it.name, it.rarity)) }
+
+            GameProgression.tools.filter { it.rarity.rank >= minRarity.rank }.forEach {
+                add(GachaRewardDef("tool", it.id, it.name, it.rarity))
+            }
+        }
+        return candidates.randomOrNull(random) ?: randomTool(minRarity, random)
+    }
+
+    private fun applyGachaReward(expansion: ExpansionSave, reward: GachaRewardDef): ExpansionSave =
+        when (reward.type) {
+            "skin" -> expansion.copy(ownedSkins = expansion.ownedSkins + reward.id)
+            "character" -> expansion.copy(ownedCharacters = expansion.ownedCharacters + reward.id)
+            "premium_machine" -> expansion.copy(premiumMachines = expansion.premiumMachines + reward.id)
+            "tool" -> expansion.copy(
+                tools = expansion.tools + (reward.id to ((expansion.tools[reward.id] ?: 0) + 1))
+            )
+            else -> expansion
+        }
 
     private fun updateCompanyLevel() {
         val computed = (1 + state.company.reputation / 20).coerceAtLeast(state.company.companyLevel)
@@ -763,15 +1249,29 @@ class GameStore {
         }
     }
 
+    private fun normalizeUnlockedSkins() {
+        val unlocked = GameProgression.unlockedLevelSkins(state.company.companyLevel)
+        val owned = state.expansion.ownedSkins + unlocked + "operador_padrao"
+        if (owned != state.expansion.ownedSkins) {
+            state = state.copy(expansion = state.expansion.copy(ownedSkins = owned))
+        }
+    }
+
     private fun normalizeAndPersist() {
         var save = state
         if (save.company.lastSimulationAt <= 0L) {
             save = save.copy(company = save.company.copy(lastSimulationAt = currentTimeMillis()))
         }
-        if (save.goals.isEmpty()) {
-            save = save.copy(goals = defaultGoals())
+        if (save.goals.isEmpty() || save.goals.none { it.id == "ten_machines" }) {
+            val claimed = save.goals.filter { it.claimed }.map { it.id }.toSet()
+            save = save.copy(goals = defaultGoals().map { if (it.id in claimed) it.copy(claimed = true) else it })
+        }
+        if (save.workforce.nextIdleCheckAt <= 0L) {
+            save = save.copy(workforce = save.workforce.copy(nextIdleCheckAt = randomIdleCheckAt(currentTimeMillis())))
         }
         state = save
+        updateCompanyLevel()
+        normalizeUnlockedSkins()
         persist()
     }
 
@@ -803,6 +1303,7 @@ class GameStore {
             ),
             machines = listOf(machine),
             goals = defaultGoals(),
+            workforce = WorkforceSave(nextIdleCheckAt = now + IDLE_CHECK_MIN_MILLIS),
         )
     }
 
@@ -811,9 +1312,35 @@ class GameStore {
         GoalSave("three_machines", "Tenha 3 máquinas instaladas", 3, 500_000L),
         GoalSave("reputation_10", "Alcance 10 de reputação", 10, 750_000L),
         GoalSave("warehouse_150", "Expanda o galpão para 150 m²", 150, 400_000L),
+        GoalSave("ten_machines", "Complexo industrial • 10 máquinas", 10, 25_000_000L),
+        GoalSave("twenty_machines", "Parque fabril gigante • 20 máquinas", 20, 75_000_000L),
+        GoalSave("thirty_machines", "IMPÉRIO INDUSTRIAL • 30 máquinas", 30, 200_000_000L, 10),
+        GoalSave("fifteen_employees", "Equipe de elite • 15 funcionários", 15, 50_000_000L),
+        GoalSave("thirty_employees", "Mega operação • 30 funcionários", 30, 180_000_000L, 8),
+        GoalSave("reputation_100", "Referência regional • 100 reputação", 100, 80_000_000L),
+        GoalSave("reputation_250", "Lenda da indústria • 250 reputação", 250, 250_000_000L, 10),
+        GoalSave("reputation_500", "Nome mundial • 500 reputação", 500, 600_000_000L, 20),
+        GoalSave("company_level_10", "Empresa nível 10", 10, 100_000_000L),
+        GoalSave("company_level_20", "Empresa nível 20", 20, 500_000_000L, 15),
+        GoalSave("warehouse_300", "Galpão de 300 m²", 300, 120_000_000L),
+        GoalSave("warehouse_500", "Mega galpão de 500 m²", 500, 300_000_000L, 10),
     )
 
+    private fun freeGridPosition(): Pair<Int, Int>? {
+        val occupied = state.machines.map { it.gridX to it.gridY }.toSet()
+        for (y in 0..5) for (x in 0..4) {
+            if ((x to y) !in occupied) return x to y
+        }
+        return null
+    }
+
+    private fun persistAndRefresh() {
+        persist()
+        refreshFactoryInput()
+    }
+
     private fun persist() {
+        state = state.copy(schemaVersion = 3)
         PlatformSaveStorage.write(SAVE_KEY, GameSaveCodec.encode(state))
     }
 
@@ -824,14 +1351,16 @@ class GameStore {
         amount: Long,
         description: String,
         at: Long = currentTimeMillis(),
-    ): List<FinanceSave> = (list + FinanceSave(
-        id = newId("finance"),
-        type = type,
-        category = category,
-        amountCents = amount,
-        description = description,
-        createdAt = at,
-    )).takeLast(200)
+    ): List<FinanceSave> = (
+        list + FinanceSave(
+            id = newId("finance"),
+            type = type,
+            category = category,
+            amountCents = amount,
+            description = description,
+            createdAt = at,
+        )
+        ).takeLast(300)
 
     private fun newId(prefix: String): String =
         "${prefix}_${currentTimeMillis()}_${idCounter++}"
@@ -849,5 +1378,7 @@ class GameStore {
             val safe = if (cents == Long.MIN_VALUE) Long.MAX_VALUE else kotlin.math.abs(cents)
             return "${sign}R$ ${safe / 100L},${(safe % 100L).toString().padStart(2, '0')}"
         }
+
+        fun percent(value: Double): String = "${(value.coerceIn(0.0, 1.0) * 100.0).roundToInt()}%"
     }
 }
