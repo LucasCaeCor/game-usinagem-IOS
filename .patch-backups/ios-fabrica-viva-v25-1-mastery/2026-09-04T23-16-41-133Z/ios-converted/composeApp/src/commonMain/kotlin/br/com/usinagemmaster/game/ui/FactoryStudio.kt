@@ -46,7 +46,6 @@ import br.com.usinagemmaster.game.domain.MinigameResult
 import br.com.usinagemmaster.game.domain.ProductionStage
 import br.com.usinagemmaster.game.model.EmployeeSave
 import br.com.usinagemmaster.game.model.MachineSave
-import br.com.usinagemmaster.game.model.MachineMastery
 import br.com.usinagemmaster.game.model.OwnerWorkBatchSave
 import br.com.usinagemmaster.game.model.PlayerProfileSave
 import kotlin.math.abs
@@ -1194,7 +1193,7 @@ private fun StudioOwnerOperationDialog(store: GameStore, machine: MachineSave, o
     val contracts = store.state.contracts.filter { it.status == "ACTIVE" && it.completedQuantity < it.quantity }
     var selectedId by remember(contracts) { mutableStateOf(contracts.firstOrNull()?.id) }
     val selected = contracts.firstOrNull { it.id == selectedId }
-    val mastery = MachineMastery(machine.machineType, store.state.career.masteryXp[machine.machineType] ?: 0)
+    val mastery = store.state.career.mastery(machine.machineType)
     val definition = MachineCatalog.byType(machine.machineType)
     var launchManual by remember { mutableStateOf(false) }
 
@@ -1302,7 +1301,7 @@ private fun StudioMachineMinigameDialog(
     val processErrors = if (blueprint.kind == MinigameKind.CNC) {
         expectedSequence.indices.count { sequence.getOrNull(it) != expectedSequence[it] }
     } else if (selectedChoice == choiceData.correct) 0 else 1
-    val mastery = MachineMastery(machine.machineType, store.state.career.masteryXp[machine.machineType] ?: 0)
+    val mastery = store.state.career.mastery(machine.machineType)
     val skillAssist = (if ("preparador" in store.state.career.unlockedSkills) .04f else 0f) +
         (if (blueprint.kind == MinigameKind.CNC && "operador_cnc" in store.state.career.unlockedSkills) .05f else 0f) +
         ((mastery.level - 1) * .006f).coerceAtMost(.08f)
