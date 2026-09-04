@@ -10,6 +10,9 @@ packages:
   GoogleSignIn:
     url: https://github.com/google/GoogleSignIn-iOS.git
     from: 9.2.0
+  GzipSwift:
+    url: https://github.com/1024jp/GzipSwift
+    from: 7.0.0
 
 settings:
   base:
@@ -34,6 +37,8 @@ targets:
           - FirebaseFirestore
       - package: GoogleSignIn
         product: GoogleSignIn
+      - package: GzipSwift
+        product: Gzip
 
     settings:
       base:

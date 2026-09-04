@@ -102,6 +102,7 @@ final class FirebaseAccountService {
         do {
             try Auth.auth().signOut()
             GIDSignIn.sharedInstance.signOut()
+            FirebaseCloudSaveService.shared.stopAutoSync()
             refreshCachedLabel()
             FirebaseCommunityService.shared.clear()
             return nil
