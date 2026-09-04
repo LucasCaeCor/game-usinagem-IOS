@@ -562,6 +562,17 @@ class GameStore {
         persistAndRefresh()
     }
 
+    /**
+     * API usada pela UI Android-parity.
+     *
+     * Mantém uma única fonte de verdade para a mudança de turno:
+     * setShiftMode delega para setShift, que já atualiza estado,
+     * notificação, persistência e refresh.
+     */
+    fun setShiftMode(mode: ShiftMode) {
+        setShift(mode)
+    }
+
     fun setSpecialty(code: String) {
         val def = GameProgression.specialties.firstOrNull { it.code == code } ?: return
         if (state.company.companyLevel < def.minLevel) return notify("Nível ${def.minLevel} necessário.")
