@@ -68,12 +68,12 @@ fun OnlineCommunityScreen(store: GameStore) {
                     Text(
                         "Firebase UID",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Steel300,
+                        color = Steel200,
                     )
                     Text(
                         online.uid,
                         style = MaterialTheme.typography.bodySmall,
-                        color = Steel100,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
             }
@@ -222,7 +222,7 @@ fun OnlineCommunityScreen(store: GameStore) {
                             "N${factory.companyLevel} • REP ${factory.reputation} • " +
                                 "${factory.machines.size} máquinas • ${factory.employeeCount} pessoas",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Steel300,
+                            color = Steel200,
                         )
                     }
                     Text("VISITAR ›", color = SafetyAmber, fontWeight = FontWeight.Black)

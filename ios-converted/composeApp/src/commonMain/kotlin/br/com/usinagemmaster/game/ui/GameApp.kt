@@ -1215,7 +1215,7 @@ private fun SettingToggle(label: String, checked: Boolean, onChange: (Boolean) -
 }
 
 @Composable
-private fun IndustrialCard(
+fun IndustrialCard(
     title: String,
     subtitle: String? = null,
     body: @Composable ColumnScope.() -> Unit,
@@ -1239,7 +1239,7 @@ private fun IndustrialCard(
 }
 
 @Composable
-private fun HeroCard(
+fun HeroCard(
     eyebrow: String,
     title: String,
     subtitle: String,
@@ -1302,7 +1302,7 @@ private fun MetricCard(
 }
 
 @Composable
-private fun CompactStat(title: String, value: String, modifier: Modifier = Modifier) {
+fun CompactStat(title: String, value: String, modifier: Modifier = Modifier) {
     Column(
         modifier.background(Steel900, RoundedCornerShape(14.dp)).padding(10.dp)
     ) {
@@ -1337,7 +1337,7 @@ private fun WarehouseBar(used: Int, total: Int) {
 }
 
 @Composable
-private fun StatePill(text: String, color: androidx.compose.ui.graphics.Color) {
+fun StatePill(text: String, color: androidx.compose.ui.graphics.Color) {
     Surface(color = color.copy(alpha = .18f), shape = RoundedCornerShape(999.dp)) {
         Text(
             text,
@@ -1357,7 +1357,7 @@ private fun EmptyState(title: String, text: String) {
 }
 
 @Composable
-private fun SectionTitle(title: String, subtitle: String) {
+fun SectionTitle(title: String, subtitle: String) {
     Column {
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
         Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
