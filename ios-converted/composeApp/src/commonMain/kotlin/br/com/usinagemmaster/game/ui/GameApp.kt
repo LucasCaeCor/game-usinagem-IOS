@@ -28,10 +28,12 @@ private enum class Screen(val title: String, val short: String, val glyph: Strin
     FACTORY("Fábrica Viva • Studio", "Fábrica", "▦"),
     CONTRACTS("Contratos industriais", "Contratos", "▤"),
     EMPLOYEES("Equipe e disciplina", "Equipe", "♟"),
-    MACHINES("Máquinas e tecnologia", "Máquinas", "⚙"),
+    MACHINES("Máquinas instaladas", "Máquinas", "⚙"),
+    STORE("Loja industrial", "Loja", "▣"),
     FINANCE("Finanças", "Finanças", "R$"),
     PROGRESSION("Empresa e pesquisa", "Evolução", "↗"),
     PROFILE("Meu personagem", "Perfil", "●"),
+    ROULETTE("Roleta Industrial", "Roleta", "◈"),
     MINIGAME("Desafio de precisão", "Precisão", "◎"),
     COMMUNITY("Comunidade", "Social", "◉"),
     SETTINGS("Configurações", "Ajustes", "☷"),
@@ -105,13 +107,15 @@ fun GameApp(store: GameStore) {
             Box(Modifier.fillMaxSize().padding(padding)) {
                 when (screen) {
                     Screen.HOME -> HomeScreen(store, onOpen = { screen = it })
-                    Screen.FACTORY -> FactoryScreen(store)
+                    Screen.FACTORY -> FactoryScreen(store, onOpen = { screen = it })
                     Screen.CONTRACTS -> ContractsScreen(store)
                     Screen.EMPLOYEES -> EmployeesScreen(store)
                     Screen.MACHINES -> MachinesScreen(store)
+                    Screen.STORE -> StoreScreen(store)
                     Screen.FINANCE -> FinanceScreen(store)
                     Screen.PROGRESSION -> ProgressionScreen(store)
-                    Screen.PROFILE -> ProfileScreen(store)
+                    Screen.PROFILE -> ProfileScreen(store, onOpen = { screen = it })
+                    Screen.ROULETTE -> IndustrialRouletteScreen(store)
                     Screen.MINIGAME -> PrecisionMinigameScreen(store)
                     Screen.COMMUNITY -> CommunityScreen(store)
                     Screen.SETTINGS -> SettingsScreen(store)
@@ -260,12 +264,14 @@ private fun HomeScreen(
         item {
             ManagementGrid(
                 entries = listOf(
-                    Triple(Screen.FACTORY, "Fábrica Viva", "2.5D, carga e chão de fábrica"),
-                    Triple(Screen.MACHINES, "Máquinas", "Loja, manutenção e células premium"),
+                    Triple(Screen.FACTORY, "Fábrica Viva", "Studio, carga, layout e chão de fábrica"),
+                    Triple(Screen.MACHINES, "Máquinas", "Instaladas, manutenção e operadores"),
+                    Triple(Screen.STORE, "Loja", "Comprar máquinas e tecnologia premium"),
                     Triple(Screen.EMPLOYEES, "Funcionários", "Equipe, exaustão, Copa e disciplina"),
                     Triple(Screen.CONTRACTS, "Contratos", "Qualidade, ferramentas, prazo e prêmio"),
                     Triple(Screen.PROGRESSION, "Evolução", "Metas, pesquisa e especialização"),
-                    Triple(Screen.PROFILE, "Personagem", "Avatar, skins, skills e roleta"),
+                    Triple(Screen.PROFILE, "Personagem", "Avatar, skins, skills e coleção"),
+                    Triple(Screen.ROULETTE, "Roleta Industrial", "Roda animada, pity e recompensas"),
                     Triple(Screen.FINANCE, "Finanças", "Caixa e histórico de lançamentos"),
                     Triple(Screen.COMMUNITY, "Comunidade", "Perfil público e camada online"),
                 ),
@@ -278,89 +284,153 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun FactoryScreen(store: GameStore) {
+private fun FactoryScreen(
+    store: GameStore,
+    onOpen: (Screen) -> Unit,
+) {
     val p = store.production
     val owner = store.ownerFrame
     val idle = store.idleEmployee
+    val frame = store.factoryFrame
+    var mode by remember { mutableStateOf("LIVE") }
+
+    val coffee = frame.workers.count {
+        it.activity == br.com.usinagemmaster.domain.simulation.WorkerActivity.BREAK
+    }
+    val logistics = frame.workers.count {
+        it.activity == br.com.usinagemmaster.domain.simulation.WorkerActivity.FETCHING_MATERIAL ||
+            it.activity == br.com.usinagemmaster.domain.simulation.WorkerActivity.CARRYING_PART ||
+            it.activity == br.com.usinagemmaster.domain.simulation.WorkerActivity.PACKING
+    }
+    val inspection = frame.workers.count {
+        it.activity == br.com.usinagemmaster.domain.simulation.WorkerActivity.INSPECTING
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(bottom = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        item { FactoryStudio(store) }
-
         item {
-            StatusStrip(
-                items = listOf(
-                    "Produção" to "${one(p.totalUnitsPer10Minutes)} pç",
-                    "Qualidade" to "${p.averageQuality}%",
-                    "Carga" to GameStore.money(store.pendingCargoCents),
-                )
-            )
-        }
-
-        item {
-            IndustrialCard("Expedição do dono", "A carga só vira caixa depois da viagem") {
-                Text(
-                    "${one(store.pendingCargoUnits)} peças • ${GameStore.money(store.pendingCargoCents)}",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Black,
-                )
-                Text(
-                    "Status: ${owner.activity.label}",
-                    color = if (owner.busy) SafetyAmber else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Button(
-                    onClick = store::startCargoDelivery,
-                    enabled = store.pendingCargo.isNotEmpty() && !owner.busy,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(if (owner.busy) "Entrega em andamento" else "Levar CARGA para entrega")
+            IndustrialCard(
+                "FÁBRICA VIVA",
+                "${store.state.company.name} • ${if (frame.open) "AO VIVO" else "FORA DO TURNO"}"
+            ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    CompactStat("Produzindo", p.operatingMachines.toString(), Modifier.weight(1f))
+                    CompactStat("Espera", p.idleMachines.toString(), Modifier.weight(1f))
+                    CompactStat("Carga", GameStore.money(store.pendingCargoCents), Modifier.weight(1f))
                 }
             }
         }
 
         item {
-            IndustrialCard("Ritmo de produção", "Controles do turno ficam no fluxo da página e não cobrem as máquinas") {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = store::boost10Minutes, modifier = Modifier.weight(1f)) {
-                        Text("+10 MIN • ${store.state.boostTokens}")
-                    }
-                    OutlinedButton(onClick = store::dailyBonus, modifier = Modifier.weight(1f)) {
-                        Text("Bônus")
-                    }
-                }
-                OutlinedButton(onClick = store::buySnack, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (store.snackActive) "Copa abastecida • foco ativo" else "Comprar cento de salgados • R$ 250,00")
-                }
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                FilterChip(selected = mode == "LIVE", onClick = { mode = "LIVE" }, label = { Text("Fábrica viva") })
+                FilterChip(selected = mode == "LAYOUT", onClick = { mode = "LAYOUT" }, label = { Text("Editar layout") })
+                FilterChip(selected = mode == "LIST", onClick = { mode = "LIST" }, label = { Text("Lista técnica") })
             }
         }
 
-        if (idle != null) {
+        item {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                StatePill("${p.operatingMachines} produzindo", ProductionGreen)
+                StatePill("${p.idleMachines} em espera", SafetyAmber)
+                if (coffee > 0) StatePill("☕ $coffee na Copa", SafetyAmberSoft)
+                if (logistics > 0) StatePill("▰ $logistics logística", ElectricBlue)
+                if (inspection > 0) StatePill("⌕ $inspection inspeção", RoyalPurple)
+            }
+        }
+
+        if (mode == "LIVE") {
             item {
-                AttentionCard(
-                    title = "${idle.name} está no celular",
-                    text = "A Fábrica Viva mostra esse operador parado. A bronca encerra a ociosidade e dá 1h de tolerância.",
-                    action = "Dar bronca",
-                    onAction = store::reprimandIdleEmployee,
-                    danger = true,
-                )
+                IndustrialCard("Ações do turno", "Os controles rolam junto da página e não cobrem as máquinas") {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Button(onClick = { onOpen(Screen.MINIGAME) }, modifier = Modifier.weight(1f)) {
+                            Text("Precisão")
+                        }
+                        OutlinedButton(onClick = store::dailyBonus, modifier = Modifier.weight(1f)) {
+                            Text("Bônus diário")
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        OutlinedButton(onClick = store::boost10Minutes, modifier = Modifier.weight(1f)) {
+                            Text("+10 min • ${store.state.boostTokens}")
+                        }
+                        OutlinedButton(onClick = store::buySnack, modifier = Modifier.weight(1f)) {
+                            Text(if (store.snackActive) "Foco ✓" else "Copa")
+                        }
+                    }
+                }
             }
-        }
 
-        item { SectionTitle("Células de produção", "Estado real de cada máquina") }
-        items(store.state.machines) { machine ->
-            val def = MachineCatalog.byType(machine.machineType)
-            val frame = store.factoryFrame.machines.firstOrNull { it.id == machine.id }
-            IndustrialCard(def?.name ?: machine.machineType, "Baia ${machine.gridX + 1}.${machine.gridY + 1}") {
-                StatePill(frame?.state?.label ?: "Aguardando simulação", machineStateColor(frame?.state))
-                Text("Condição ${machine.condition}/1000 • nível ${machine.level}")
-                Text(
-                    "Operador: ${store.state.employees.firstOrNull { it.assignedMachineId == machine.id }?.name ?: "não atribuído"}"
-                )
-                if (frame?.needsMaintenance == true) {
-                    Text("Manutenção recomendada", color = SafetyAmber, fontWeight = FontWeight.Bold)
+            if (idle != null) {
+                item {
+                    AttentionCard(
+                        title = "${idle.name} está no celular",
+                        text = "A bronca encerra a ociosidade e cria uma janela de tolerância.",
+                        action = "Dar bronca",
+                        onAction = store::reprimandIdleEmployee,
+                        danger = true,
+                    )
+                }
+            }
+
+            item { FactoryStudio(store, modifier = Modifier.padding(horizontal = 2.dp)) }
+
+            item {
+                IndustrialCard("Expedição do dono", "A carga só vira caixa depois da viagem") {
+                    Text(
+                        "${one(store.pendingCargoUnits)} peças • ${GameStore.money(store.pendingCargoCents)}",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Black,
+                    )
+                    Text("Status: ${owner.activity.label}")
+                    Button(
+                        onClick = store::startCargoDelivery,
+                        enabled = store.pendingCargo.isNotEmpty() && !owner.busy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (owner.busy) "Entrega em andamento" else "Levar CARGA para entrega")
+                    }
+                }
+            }
+
+            item {
+                IndustrialCard("Fechamento da produção", "Resumo depois do chão de fábrica") {
+                    Text("${one(p.totalUnitsPer10Minutes)} pç / 10 min • qualidade ${p.averageQuality}%")
+                    Text("Lucro estimado / 10 min: ${GameStore.money(p.netPer10MinutesCents)}")
+                }
+            }
+        } else if (mode == "LAYOUT") {
+            item { SectionTitle("Editar layout", "Reposicione células sem misturar esta função com a Loja") }
+            items(store.state.machines) { machine ->
+                val def = MachineCatalog.byType(machine.machineType)
+                IndustrialCard(def?.name ?: machine.machineType, "Baia ${machine.gridX + 1}.${machine.gridY + 1}") {
+                    Text("Espaço: ${def?.space ?: 0} m² • condição ${machine.condition}/1000")
+                    Button(onClick = { store.moveMachineNext(machine.id) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Mover para próxima posição livre")
+                    }
+                }
+            }
+        } else {
+            item { SectionTitle("Lista técnica", "Estado, operador e capacidade das máquinas instaladas") }
+            items(store.state.machines) { machine ->
+                val def = MachineCatalog.byType(machine.machineType)
+                val machineFrame = frame.machines.firstOrNull { it.id == machine.id }
+                IndustrialCard(def?.name ?: machine.machineType, "Baia ${machine.gridX + 1}.${machine.gridY + 1}") {
+                    StatePill(machineFrame?.state?.label ?: "Sem leitura", machineStateColor(machineFrame?.state))
+                    Text("Condição ${machine.condition}/1000 • nível ${machine.level}")
+                    Text("Produção-base ${one(def?.baseProductionPerHour ?: 0.0)} pç/h")
+                    Text(
+                        "Operador: ${store.state.employees.firstOrNull { it.assignedMachineId == machine.id }?.name ?: "não atribuído"}"
+                    )
                 }
             }
         }
@@ -378,50 +448,101 @@ private fun MachinesScreen(store: GameStore) {
     ) {
         item {
             SectionTitle(
-                "Parque fabril",
-                "${store.state.machines.size} instalada(s) • ${store.state.company.usedWarehouseSpace}/${store.state.company.warehouseSpace} m²"
+                "Máquinas instaladas",
+                "${store.state.machines.size} no parque fabril • ${store.state.company.usedWarehouseSpace}/${store.state.company.warehouseSpace} m²"
             )
         }
         items(store.state.machines) { machine ->
             val def = MachineCatalog.byType(machine.machineType)
+            val machineFrame = store.factoryFrame.machines.firstOrNull { it.id == machine.id }
             IndustrialCard(def?.name ?: machine.machineType, "Condição ${machine.condition}/1000") {
+                StatePill(machineFrame?.state?.label ?: "Aguardando", machineStateColor(machineFrame?.state))
                 val operator = store.state.employees.firstOrNull { it.assignedMachineId == machine.id }
                 Text("Operador: ${operator?.name ?: "sem operador"}")
                 Text("Produção-base: ${one(def?.baseProductionPerHour ?: 0.0)} pç/h")
+                Text("Posição: baia ${machine.gridX + 1}.${machine.gridY + 1}")
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedButton(onClick = { store.repairMachine(machine.id) }, modifier = Modifier.weight(1f)) { Text("Manutenção") }
-                    OutlinedButton(onClick = { store.moveMachineNext(machine.id) }, modifier = Modifier.weight(1f)) { Text("Mover") }
+                    OutlinedButton(onClick = { store.repairMachine(machine.id) }, modifier = Modifier.weight(1f)) {
+                        Text("Manutenção")
+                    }
+                    OutlinedButton(onClick = { store.moveMachineNext(machine.id) }, modifier = Modifier.weight(1f)) {
+                        Text("Mover")
+                    }
                 }
                 TextButton(onClick = { store.sellMachine(machine.id) }) { Text("Revender máquina") }
             }
         }
+    }
+}
 
-        item { SectionTitle("Loja de máquinas", "Máquinas convencionais e CNC do catálogo") }
-        items(store.machineShop) { def ->
-            IndustrialCard(def.name, "Nível de qualidade ${def.quality}") {
+@Composable
+private fun StoreScreen(store: GameStore) {
+    var tab by remember { mutableStateOf("CATALOG") }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item {
+            HeroCard(
+                eyebrow = "LOJA INDUSTRIAL",
+                title = "Modernize seu parque fabril",
+                subtitle = "Comprar é diferente de gerenciar: aqui ficam catálogo e tecnologia premium.",
+                accent = SafetyAmber,
+            ) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(GameStore.money(def.priceCents), fontWeight = FontWeight.Black)
-                    Text("${def.space} m²")
+                    Text("Saldo disponível")
+                    Text(GameStore.money(store.state.company.cashCents), fontWeight = FontWeight.Black)
                 }
-                Text("${one(def.baseProductionPerHour)} pç/h • ${one(def.powerKw)} kW")
-                Button(onClick = { store.buyMachine(def.type.name) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Comprar e instalar")
-                }
+                WarehouseBar(store.state.company.usedWarehouseSpace, store.state.company.warehouseSpace)
             }
         }
 
-        item { SectionTitle("Tecnologia premium", "Bônus permanentes da expansão industrial") }
-        items(GameProgression.premiumMachines) { premium ->
-            val owned = premium.id in store.state.expansion.premiumMachines
-            IndustrialCard("${premium.name} • ${premium.rarity.label}", "Libera no nível ${premium.minLevel}") {
-                Text(premium.description)
-                Text(GameStore.money(premium.priceCents), fontWeight = FontWeight.Black)
-                Button(
-                    onClick = { store.buyPremiumMachine(premium.id) },
-                    enabled = !owned && store.state.company.companyLevel >= premium.minLevel,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(if (owned) "Adquirida" else "Adquirir célula premium")
+        item {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                FilterChip(selected = tab == "CATALOG", onClick = { tab = "CATALOG" }, label = { Text("Máquinas") })
+                FilterChip(selected = tab == "PREMIUM", onClick = { tab = "PREMIUM" }, label = { Text("Premium") })
+            }
+        }
+
+        if (tab == "CATALOG") {
+            item { SectionTitle("Catálogo de máquinas", "Convencionais, CNC e células produtivas") }
+            items(store.machineShop) { def ->
+                IndustrialCard(def.name, "Qualidade ${def.quality} • ${def.space} m²") {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(GameStore.money(def.priceCents), fontWeight = FontWeight.Black)
+                        Text("${one(def.baseProductionPerHour)} pç/h")
+                    }
+                    Text("${one(def.powerKw)} kW • manutenção ${GameStore.money(def.maintenanceCents)}")
+                    val hasSpace = store.state.company.usedWarehouseSpace + def.space <= store.state.company.warehouseSpace
+                    if (!hasSpace) StatePill("Galpão sem espaço", DangerRed)
+                    Button(
+                        onClick = { store.buyMachine(def.type.name) },
+                        enabled = store.state.company.cashCents >= def.priceCents && hasSpace,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Comprar e instalar") }
+                }
+            }
+        } else {
+            item { SectionTitle("Tecnologia premium", "Bônus permanentes e células especiais") }
+            items(GameProgression.premiumMachines) { premium ->
+                val owned = premium.id in store.state.expansion.premiumMachines
+                IndustrialCard("${premium.name} • ${premium.rarity.label}", "Nível ${premium.minLevel}") {
+                    Text(premium.description)
+                    Text(GameStore.money(premium.priceCents), fontWeight = FontWeight.Black)
+                    Button(
+                        onClick = { store.buyPremiumMachine(premium.id) },
+                        enabled = !owned &&
+                            store.state.company.companyLevel >= premium.minLevel &&
+                            store.state.company.cashCents >= premium.priceCents,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (owned) "Adquirida" else "Adquirir tecnologia")
+                    }
                 }
             }
         }
@@ -729,7 +850,10 @@ private fun ProgressionScreen(store: GameStore) {
 }
 
 @Composable
-private fun ProfileScreen(store: GameStore) {
+private fun ProfileScreen(
+    store: GameStore,
+    onOpen: (Screen) -> Unit,
+) {
     var draft by remember(store.state.profile) { mutableStateOf(store.state.profile) }
     var tab by remember { mutableStateOf("AVATAR") }
 
@@ -827,14 +951,20 @@ private fun ProfileScreen(store: GameStore) {
                 }
             }
             "ROULETA" -> item {
-                IndustrialCard("Roleta Industrial", "Pity épico ${store.state.expansion.pityEpic}/30 • lendário ${store.state.expansion.pityLegendary}/80") {
+                IndustrialCard(
+                    "Roleta Industrial",
+                    "Roda visual, animação, ponteiro, pity e revelação da recompensa"
+                ) {
                     Text("${store.state.expansion.gachaTickets} ficha(s)", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-                    Text("Não sorteia ficha como prêmio. Personagens/skins/máquinas únicas não repetem enquanto houver opção nova.")
                     store.lastGachaReward?.let {
-                        StatePill("${it.rarity.label} • ${it.title}", rarityColor(it.rarity))
+                        StatePill("Último prêmio • ${it.rarity.label}: ${it.title}", rarityColor(it.rarity))
                     }
-                    Button(onClick = store::spinGacha, modifier = Modifier.fillMaxWidth()) { Text("GIRAR") }
-                    OutlinedButton(onClick = store::claimDailyGachaTicket, modifier = Modifier.fillMaxWidth()) { Text("Coletar ficha diária") }
+                    Button(onClick = { onOpen(Screen.ROULETTE) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("ABRIR ROLETA")
+                    }
+                    OutlinedButton(onClick = store::claimDailyGachaTicket, modifier = Modifier.fillMaxWidth()) {
+                        Text("Coletar ficha diária")
+                    }
                 }
             }
             "PERSONAGENS" -> {
@@ -1030,10 +1160,12 @@ private fun MoreScreen(onOpen: (Screen) -> Unit) {
         item { SectionTitle("Gestão completa", "Áreas secundárias sem esconder recursos") }
         items(
             listOf(
-                Triple(Screen.MACHINES, "Máquinas e loja", "Parque fabril + premium"),
+                Triple(Screen.MACHINES, "Máquinas", "Parque fabril instalado e manutenção"),
+                Triple(Screen.STORE, "Loja", "Catálogo de máquinas e tecnologia premium"),
                 Triple(Screen.FINANCE, "Finanças", "Caixa e lançamentos"),
                 Triple(Screen.PROGRESSION, "Empresa e pesquisa", "Metas, galpão, especialidade e skills"),
-                Triple(Screen.PROFILE, "Meu personagem", "Avatar, skins, personagens e roleta"),
+                Triple(Screen.PROFILE, "Meu personagem", "Avatar, skins, personagens e skills"),
+                Triple(Screen.ROULETTE, "Roleta Industrial", "Roda animada e recompensas"),
                 Triple(Screen.MINIGAME, "Desafio de precisão", "Recompensa e impulsos"),
                 Triple(Screen.COMMUNITY, "Comunidade", "Perfil público e Firebase"),
                 Triple(Screen.SETTINGS, "Configurações", "Turno, experiência e save"),

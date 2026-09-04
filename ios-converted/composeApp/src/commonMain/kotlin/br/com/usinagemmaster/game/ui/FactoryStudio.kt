@@ -3,8 +3,11 @@ package br.com.usinagemmaster.game.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -52,9 +55,9 @@ fun FactoryStudio(
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    SmallZoomButton("−") { zoom = (zoom - .18f).coerceIn(.65f, 2.4f) }
+                    SmallZoomButton("−") { zoom = (zoom - .18f).coerceIn(.78f, 3.25f) }
                     SmallZoomButton("${(zoom * 100).toInt()}%") { zoom = 1f; pan = Offset.Zero }
-                    SmallZoomButton("+") { zoom = (zoom + .18f).coerceIn(.65f, 2.4f) }
+                    SmallZoomButton("+") { zoom = (zoom + .18f).coerceIn(.78f, 3.25f) }
                 }
             }
 
@@ -63,13 +66,24 @@ fun FactoryStudio(
             Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(420.dp)
+                    .height(520.dp)
                     .background(Steel950, RoundedCornerShape(18.dp))
                     .border(1.dp, Steel700, RoundedCornerShape(18.dp))
                     .pointerInput(Unit) {
-                        detectTransformGestures { _, panChange, zoomChange, _ ->
-                            zoom = (zoom * zoomChange).coerceIn(.65f, 2.4f)
-                            pan += panChange
+                        // Um dedo pertence ao scroll vertical; câmera só captura 2+ dedos.
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            var event = awaitPointerEvent()
+                            while (event.changes.any { it.pressed }) {
+                                if (event.changes.count { it.pressed } >= 2) {
+                                    val zoomChange = event.calculateZoom()
+                                    val panChange = event.calculatePan()
+                                    zoom = (zoom * zoomChange).coerceIn(.78f, 3.25f)
+                                    pan += panChange
+                                    event.changes.forEach { it.consume() }
+                                }
+                                event = awaitPointerEvent()
+                            }
                         }
                     }
                     .pointerInput(Unit) {
@@ -132,6 +146,45 @@ private fun DrawScope.drawFactoryStudioScene(
         origin.y + (p.x + p.y) * halfH * .52f,
     )
 
+    // Parede, vigas, iluminação e ponte rolante — direção Studio Android.
+    drawRect(Color(0xFF111A1F), topLeft = Offset.Zero, size = Size(size.width, size.height))
+    drawRect(
+        Color(0xFF1D2A31),
+        topLeft = Offset(size.width * .035f, size.height * .025f),
+        size = Size(size.width * .93f, size.height * .20f),
+    )
+    repeat(6) { i ->
+        val x = size.width * (.08f + i * .17f)
+        drawRect(
+            Color(0xFF5E6B72).copy(alpha = .32f),
+            topLeft = Offset(x, size.height * .035f),
+            size = Size(3f, size.height * .18f),
+        )
+        drawCircle(
+            Color(0xFFFFE0A0).copy(alpha = .18f),
+            radius = halfW * .34f,
+            center = Offset(x + halfW * .15f, size.height * .16f),
+        )
+    }
+
+    val craneY = size.height * .235f
+    drawLine(Color(0xFFD89A32), Offset(size.width * .08f, craneY), Offset(size.width * .92f, craneY), halfW * .10f)
+    drawLine(Color(0xFF704E21), Offset(size.width * .08f, craneY + halfW * .17f), Offset(size.width * .92f, craneY + halfW * .17f), halfW * .05f)
+    val trolleyPhase = ((store.state.company.lastSimulationAt / 80L) % 1000L) / 1000f
+    val trolleyX = size.width * (.22f + trolleyPhase * .56f)
+    drawRoundRect(
+        SafetyAmber,
+        topLeft = Offset(trolleyX - halfW * .22f, craneY - halfW * .13f),
+        size = Size(halfW * .44f, halfW * .26f),
+        cornerRadius = CornerRadius(halfW * .05f),
+    )
+    drawLine(
+        Color(0xFFCBD3D7),
+        Offset(trolleyX, craneY + halfW * .10f),
+        Offset(trolleyX, craneY + halfW * .72f),
+        halfW * .045f,
+    )
+
     // Galpão isométrico.
     val floorPath = Path().apply {
         moveTo(project(FloorPoint(0f, 0f)).x, project(FloorPoint(0f, 0f)).y)
@@ -150,6 +203,19 @@ private fun DrawScope.drawFactoryStudioScene(
     for (y in 0..FactoryFloor.HEIGHT step 4) {
         drawLine(Color.White.copy(alpha = .055f), project(FloorPoint(0f, y.toFloat())), project(FloorPoint(FactoryFloor.WIDTH.toFloat(), y.toFloat())), 1f)
     }
+
+    drawLine(
+        SafetyAmber.copy(alpha = .58f),
+        project(FloorPoint(0f, 21.8f)),
+        project(FloorPoint(20f, 21.8f)),
+        (halfW * .10f).coerceAtLeast(2f),
+    )
+    drawLine(
+        Color.White.copy(alpha = .18f),
+        project(FloorPoint(0f, 19.7f)),
+        project(FloorPoint(20f, 19.7f)),
+        (halfW * .04f).coerceAtLeast(1f),
+    )
 
     drawZone(project(FactoryFloor.STOCK.point()), halfW, Color(0xFF735327))
     drawZone(project(FactoryFloor.TOOLS.point()), halfW, Color(0xFF315D79))
