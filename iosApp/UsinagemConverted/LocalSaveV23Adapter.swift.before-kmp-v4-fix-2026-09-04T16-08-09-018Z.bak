@@ -134,7 +134,7 @@ final class LocalSaveV23Adapter {
         }
 
         let newKmp = try androidToKmp(root)
-        guard newKmp.contains("COMPANY|"), newKmp.contains("VERSION|4") else {
+        guard newKmp.contains("COMPANY|"), newKmp.contains("VERSION|3") else {
             throw V23AdapterError.invalidAndroidSave(
                 "A conversão do backup Android não gerou um save KMP válido."
             )
