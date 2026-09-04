@@ -133,7 +133,7 @@ fun IndustrialRouletteScreen(store: GameStore) {
                                     color = Color(0xFF10171B),
                                     start = center,
                                     end = end,
-                                    width = 2.4f,
+                                    strokeWidth = 2.4f,
                                 )
                             }
                         }
@@ -157,7 +157,7 @@ fun IndustrialRouletteScreen(store: GameStore) {
                             color = Color.White.copy(alpha = .75f),
                             start = Offset(center.x, d * .04f),
                             end = Offset(center.x, d * .095f),
-                            width = 3f,
+                            strokeWidth = 3f,
                             cap = StrokeCap.Round,
                         )
                     }
