@@ -1142,6 +1142,19 @@ private fun SettingsScreen(store: GameStore) {
             }
         }
         item {
+            IndustrialCard("Conta online", onlineAccountLabel()) {
+                Text(
+                    "A conta Google libera a identidade online sem substituir ou apagar o save local da oficina."
+                )
+                Button(
+                    onClick = { openOnlineAccountPanel() },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Gerenciar conta Google")
+                }
+            }
+        }
+        item {
             IndustrialCard("Persistência", "Schema 3 • compatível com o save criado na V6") {
                 Text("O estado é gravado no armazenamento nativo do iPhone após cada transação relevante.")
                 TextButton(onClick = store::resetSave) { Text("Apagar save e iniciar nova oficina") }

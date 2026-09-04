@@ -3,15 +3,23 @@ name: UsinagemConverted
 options:
   bundleIdPrefix: br.com.usinagemmaster
 
+packages:
+  Firebase:
+    url: https://github.com/firebase/firebase-ios-sdk.git
+    from: 12.17.0
+  GoogleSignIn:
+    url: https://github.com/google/GoogleSignIn-iOS.git
+    from: 9.2.0
+
 settings:
   base:
-    IPHONEOS_DEPLOYMENT_TARGET: "14.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "15.0"
 
 targets:
   UsinagemConverted:
     type: application
     platform: iOS
-    deploymentTarget: "14.0"
+    deploymentTarget: "15.0"
 
     sources:
       - path: UsinagemConverted
@@ -19,6 +27,12 @@ targets:
     dependencies:
       - framework: ../ios-converted/composeApp/build/bin/iosArm64/debugFramework/Shared.framework
         embed: false
+      - package: Firebase
+        products:
+          - FirebaseCore
+          - FirebaseAuth
+      - package: GoogleSignIn
+        product: GoogleSignIn
 
     settings:
       base:
@@ -30,6 +44,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         INFOPLIST_FILE: UsinagemConverted/Info.plist
         GENERATE_INFOPLIST_FILE: NO
+        OTHER_LDFLAGS: "$(inherited) -ObjC"
         FRAMEWORK_SEARCH_PATHS:
           - "$(inherited)"
           - "$(PROJECT_DIR)/../ios-converted/composeApp/build/bin/iosArm64/debugFramework"
