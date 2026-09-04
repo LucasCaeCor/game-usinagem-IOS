@@ -7,13 +7,13 @@ import br.com.usinagemmaster.game.model.*
  *
  * Compatibilidade:
  * - lê o save V6 (schema 2);
- * - grava schema 3;
+ * - grava schema 4;
  * - campos novos possuem defaults seguros;
  * - o mesmo SAVE_KEY é mantido pelo GameStore.
  */
 object GameSaveCodec {
     fun encode(save: GameSave): String = buildString {
-        row("VERSION", 3)
+        row("VERSION", 4)
         row(
             "COMPANY",
             save.company.name,
@@ -51,7 +51,7 @@ object GameSaveCodec {
             save.bestMinigameScore,
         )
         row(
-            "EXP3",
+            "EXP4",
             save.expansion.specialty,
             encodeSet(save.expansion.companySkills),
             encodeSet(save.expansion.playerSkills),
@@ -67,7 +67,55 @@ object GameSaveCodec {
             encodeSet(save.expansion.premiumMachines),
             save.expansion.playerXp,
             save.expansion.lastDailyTicketDay,
+            encodeSet(save.expansion.claimedRentalXpIds),
+            save.expansion.remoteHireOwnerUid ?: "",
+            save.expansion.remoteHireName ?: "",
+            save.expansion.remoteHireBoostPct,
+            save.expansion.remoteHireEndsAt,
         )
+        row(
+            "WORKLIFE4",
+            save.autoRest,
+            save.playerFatigue,
+            save.playerRestingUntil,
+        )
+        row(
+            "CAREER4",
+            save.career.totalManualOperations,
+            save.career.assistedOperations,
+            save.career.perfectOperations,
+            save.career.approvedBatches,
+            save.career.shippedBatches,
+            save.career.reworkedBatches,
+            save.career.scrappedBatches,
+            save.career.bestScore,
+            save.career.operationStreak,
+            save.career.earnedSkillPoints,
+            save.career.productionPolicy,
+            save.career.lastOperationAt,
+            encodeSet(save.career.milestones),
+            encodeSet(save.career.achievements),
+        )
+        row(
+            "CAREER_SKILLS4",
+            encodeSet(save.career.unlockedSkills),
+            encodeIntMap(save.career.masteryXp),
+        )
+        save.career.activeBatch?.let {
+            row(
+                "CAREER_BATCH4",
+                it.id, it.machineId, it.machineType, it.contractId, it.stage,
+                it.producedQuantity, it.quality, it.precision, it.speed,
+                it.mistakes, it.perfect, it.manual, it.reworkCount,
+                it.createdAt, it.updatedAt,
+            )
+        }
+        save.legendaryMissions.forEach {
+            row(
+                "LM4", it.id, it.legendaryCode, it.title, it.description, it.metric,
+                it.target, it.progress, it.rewardCents, it.claimed,
+            )
+        }
         row(
             "PROFILE3",
             save.profile.name,
@@ -128,7 +176,12 @@ object GameSaveCodec {
         var profile = PlayerProfileSave()
         var uiSettings = UiSettingsSave()
         var workforce = WorkforceSave()
+        var autoRest = true
+        var playerFatigue = 0.0
+        var playerRestingUntil = 0L
+        var career = CareerSave()
 
+        val legendaryMissions = mutableListOf<LegendaryMissionSave>()
         val machines = mutableListOf<MachineSave>()
         val employees = mutableListOf<EmployeeSave>()
         val contracts = mutableListOf<ContractSave>()
@@ -169,6 +222,61 @@ object GameSaveCodec {
                     idleUntilAt = p.long(3),
                     nextIdleCheckAt = p.long(4),
                 )
+                "WORKLIFE4" -> {
+                    autoRest = p.bool(1, true)
+                    playerFatigue = p.double(2).coerceIn(0.0, 100.0)
+                    playerRestingUntil = p.long(3)
+                }
+                "CAREER4" -> career = career.copy(
+                    totalManualOperations = p.int(1),
+                    assistedOperations = p.int(2),
+                    perfectOperations = p.int(3),
+                    approvedBatches = p.int(4),
+                    shippedBatches = p.int(5),
+                    reworkedBatches = p.int(6),
+                    scrappedBatches = p.int(7),
+                    bestScore = p.int(8),
+                    operationStreak = p.int(9),
+                    earnedSkillPoints = p.int(10, 1).coerceAtLeast(0),
+                    productionPolicy = p.text(11, "BALANCED"),
+                    lastOperationAt = p.long(12),
+                    milestones = decodeSet(p.text(13)),
+                    achievements = decodeSet(p.text(14)),
+                )
+                "CAREER_SKILLS4" -> career = career.copy(
+                    unlockedSkills = decodeSet(p.text(1)),
+                    masteryXp = decodeIntMap(p.text(2)),
+                )
+                "CAREER_BATCH4" -> career = career.copy(
+                    activeBatch = OwnerWorkBatchSave(
+                        id = p.text(1),
+                        machineId = p.text(2),
+                        machineType = p.text(3),
+                        contractId = p.text(4),
+                        stage = p.text(5, "MACHINED"),
+                        producedQuantity = p.int(6, 1),
+                        quality = p.int(7, 50),
+                        precision = p.int(8),
+                        speed = p.int(9),
+                        mistakes = p.int(10),
+                        perfect = p.bool(11),
+                        manual = p.bool(12),
+                        reworkCount = p.int(13),
+                        createdAt = p.long(14),
+                        updatedAt = p.long(15),
+                    )
+                )
+                "LM4" -> legendaryMissions += LegendaryMissionSave(
+                    id = p.text(1),
+                    legendaryCode = p.text(2),
+                    title = p.text(3),
+                    description = p.text(4),
+                    metric = p.text(5),
+                    target = p.long(6),
+                    progress = p.long(7),
+                    rewardCents = p.long(8),
+                    claimed = p.bool(9),
+                )
                 "MINIGAME3" -> {
                     lastMinigameAt = p.long(1)
                     bestMinigameScore = p.double(2).coerceIn(0.0, 1.0)
@@ -205,6 +313,29 @@ object GameSaveCodec {
                     premiumMachines = decodeSet(p.text(13)),
                     playerXp = p.long(14),
                     lastDailyTicketDay = p.long(15, -1L),
+                )
+
+                "EXP4" -> expansion = ExpansionSave(
+                    specialty = p.text(1, "generalista"),
+                    companySkills = decodeSet(p.text(2)),
+                    playerSkills = decodeSet(p.text(3)),
+                    gachaTickets = p.int(4, 5),
+                    pityEpic = p.int(5),
+                    pityLegendary = p.int(6),
+                    ownedSkins = decodeSet(p.text(7)).ifEmpty { setOf("operador_padrao") },
+                    equippedSkin = p.text(8, "operador_padrao"),
+                    ownedCharacters = decodeSet(p.text(9)),
+                    equippedCharacter = p.text(10).ifBlank { null },
+                    tools = decodeIntMap(p.text(11)).ifEmpty(::starterTools),
+                    contractTools = decodeStringMap(p.text(12)),
+                    premiumMachines = decodeSet(p.text(13)),
+                    playerXp = p.long(14),
+                    lastDailyTicketDay = p.long(15, -1L),
+                    claimedRentalXpIds = decodeSet(p.text(16)),
+                    remoteHireOwnerUid = p.text(17).ifBlank { null },
+                    remoteHireName = p.text(18).ifBlank { null },
+                    remoteHireBoostPct = p.int(19).coerceIn(0, 25),
+                    remoteHireEndsAt = p.long(20),
                 )
                 // V6 profile row: Portuguese display values are normalized to stable codes.
                 "PROFILE" -> profile = PlayerProfileSave(
@@ -331,7 +462,7 @@ object GameSaveCodec {
         }
 
         GameSave(
-            schemaVersion = maxOf(3, version),
+            schemaVersion = maxOf(4, version),
             company = company ?: return null,
             machines = machines,
             employees = employees,
@@ -339,11 +470,16 @@ object GameSaveCodec {
             cargo = cargo,
             finances = finances,
             goals = goals,
+            legendaryMissions = legendaryMissions,
+            career = career,
             expansion = expansion,
             profile = profile,
             uiSettings = uiSettings,
             workforce = workforce,
             shiftMode = shift,
+            autoRest = autoRest,
+            playerFatigue = playerFatigue,
+            playerRestingUntil = playerRestingUntil,
             boostTokens = boostTokens.coerceAtLeast(0),
             snackUntil = snackUntil,
             lastDailyBonusDay = lastDaily,

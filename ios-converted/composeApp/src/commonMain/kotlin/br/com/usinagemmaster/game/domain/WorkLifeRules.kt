@@ -2,6 +2,7 @@ package br.com.usinagemmaster.game.domain
 
 import br.com.usinagemmaster.game.model.EmployeeSave
 import br.com.usinagemmaster.game.model.ShiftMode
+import kotlin.math.roundToInt
 
 object WorkLifeRules {
     fun factoryOpen(mode: ShiftMode, now: Long): Boolean =
@@ -12,8 +13,23 @@ object WorkLifeRules {
 
     fun efficiency(employee: EmployeeSave, now: Long): Double {
         if (resting(employee, now)) return 0.0
-        val fatigue = employee.fatigue.coerceIn(0.0, 100.0)
-        return (1.0 - fatigue / 145.0).coerceIn(.35, 1.0)
+        return efficiencyForFatigue(employee.fatigue)
+    }
+
+    fun efficiencyForFatigue(fatigue: Double): Double = when (fatigue.coerceIn(0.0, 100.0).roundToInt()) {
+        in 0..34 -> 1.00
+        in 35..59 -> 0.94
+        in 60..79 -> 0.82
+        in 80..94 -> 0.62
+        else -> 0.38
+    }
+
+    fun exhaustionLabel(fatigue: Double): String = when (fatigue.coerceIn(0.0, 100.0).roundToInt()) {
+        in 0..34 -> "Descansado"
+        in 35..59 -> "Cansaço leve"
+        in 60..79 -> "Cansado"
+        in 80..94 -> "Exausto"
+        else -> "Limite físico"
     }
 
     /**

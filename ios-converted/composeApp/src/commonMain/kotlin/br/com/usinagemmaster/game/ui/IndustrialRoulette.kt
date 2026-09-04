@@ -20,7 +20,8 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import br.com.usinagemmaster.game.domain.GameStore
-import br.com.usinagemmaster.game.domain.currentTimeMillis
+import br.com.usinagemmaster.game.domain.GachaRewardDef
+import br.com.usinagemmaster.game.domain.RarityDef
 import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.cos
@@ -65,12 +66,12 @@ fun IndustrialRouletteScreen(store: GameStore) {
                 ) {
                     RouletteStat(
                         "Pity épico",
-                        "${store.state.expansion.pityEpic}/30",
+                        "${store.state.expansion.pityEpic}/40",
                         Modifier.weight(1f),
                     )
                     RouletteStat(
                         "Pity lendário",
-                        "${store.state.expansion.pityLegendary}/80",
+                        "${store.state.expansion.pityLegendary}/100",
                         Modifier.weight(1f),
                     )
                 }
@@ -219,17 +220,27 @@ fun IndustrialRouletteScreen(store: GameStore) {
                     if (!spinning && store.state.expansion.gachaTickets > 0) {
                         scope.launch {
                             spinning = true
+                            val reward = store.spinGacha()
+                            if (reward == null) {
+                                spinning = false
+                                return@launch
+                            }
                             val start = rotation.value % 360f
                             rotation.snapTo(start)
-                            val jitter = (currentTimeMillis() % 320L).toFloat()
+                            val sweep = 360f / rouletteSlices.size
+                            val targetIndex = rouletteTargetIndex(reward)
+                            // O ponteiro está a -90°. O centro do setor premiado deve terminar ali.
+                            val sectorCenter = targetIndex * sweep + sweep / 2f
+                            val normalizedStart = ((start % 360f) + 360f) % 360f
+                            val desiredModulo = (360f - sectorCenter) % 360f
+                            val delta = (desiredModulo - normalizedStart + 360f) % 360f
                             rotation.animateTo(
-                                targetValue = start + 1_620f + jitter,
+                                targetValue = start + 1_440f + delta,
                                 animationSpec = tween(
-                                    durationMillis = 2_650,
+                                    durationMillis = 2_800,
                                     easing = FastOutSlowInEasing,
                                 ),
                             )
-                            store.spinGacha()
                             spinning = false
                         }
                     }
@@ -263,6 +274,17 @@ fun IndustrialRouletteScreen(store: GameStore) {
             )
         }
     }
+}
+
+private fun rouletteTargetIndex(reward: GachaRewardDef): Int = when {
+    reward.rarity == RarityDef.LEGENDARY -> 7
+    reward.rarity == RarityDef.EPIC -> 4
+    reward.type.contains("PREMIUM", ignoreCase = true) || reward.type.contains("MACHINE", ignoreCase = true) -> 5
+    reward.type.contains("CHAR", ignoreCase = true) -> 2
+    reward.type.contains("SKIN", ignoreCase = true) -> 1
+    reward.rarity == RarityDef.RARE -> 3
+    reward.type.contains("TOOL", ignoreCase = true) -> 0
+    else -> 6
 }
 
 @Composable

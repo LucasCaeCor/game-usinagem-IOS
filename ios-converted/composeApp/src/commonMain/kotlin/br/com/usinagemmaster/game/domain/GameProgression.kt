@@ -133,12 +133,16 @@ object GameProgression {
     )
 
     val characters = listOf(
+        CharacterDef("operador_multitarefa", "Operador Multitarefa", 1, RarityDef.COMMON, "+2% de produção global.", globalSpeedPct = 2),
+        CharacterDef("torneiro_junior", "Torneiro Júnior", 2, RarityDef.COMMON, "+5% em torneamento.", turningPct = 5),
         CharacterDef("cuca_aprendiz", "Cuca • Aprendiz de Setup", 2, RarityDef.RARE, "+3% de produção global.", globalSpeedPct = 3),
-        CharacterDef("mestre_torneiro", "Mestre Torneiro", 5, RarityDef.EPIC, "+12% em torneamento.", turningPct = 12),
-        CharacterDef("programadora_cnc", "Programadora CNC", 6, RarityDef.EPIC, "+10% CNC e +3 qualidade.", qualityBonus = 3, cncPct = 10),
-        CharacterDef("inspetor_zero", "Inspetor Zero", 7, RarityDef.EPIC, "+8 de qualidade.", qualityBonus = 8),
-        CharacterDef("mestre_5_eixos", "Mestre dos 5 Eixos", 10, RarityDef.LEGENDARY, "+8% global, +10% fresagem e +10% CNC.", globalSpeedPct = 8, millingPct = 10, cncPct = 10),
-        CharacterDef("lenda_chao_fabrica", "Lenda do Chão de Fábrica", 14, RarityDef.LEGENDARY, "+12% global e +5 qualidade.", globalSpeedPct = 12, qualityBonus = 5),
+        CharacterDef("fresadora_agil", "Fresadora Ágil", 3, RarityDef.RARE, "+7% em fresagem.", millingPct = 7),
+        CharacterDef("controle_qualidade", "Controle de Qualidade", 4, RarityDef.RARE, "+4 de qualidade.", qualityBonus = 4),
+        CharacterDef("mestre_torneiro", "Mestre Torneiro", 5, RarityDef.EPIC, "+12% em torneamento. Prestígio: somente roleta, pity, metas e eventos.", turningPct = 12),
+        CharacterDef("programadora_cnc", "Programadora CNC", 6, RarityDef.EPIC, "+10% CNC e +3 qualidade. Prestígio.", qualityBonus = 3, cncPct = 10),
+        CharacterDef("inspetor_zero", "Inspetor Zero", 7, RarityDef.EPIC, "+8 de qualidade. Prestígio.", qualityBonus = 8),
+        CharacterDef("mestre_5_eixos", "Mestre dos 5 Eixos", 10, RarityDef.LEGENDARY, "+8% global, +10% fresagem e +10% CNC. Prestígio.", globalSpeedPct = 8, millingPct = 10, cncPct = 10),
+        CharacterDef("lenda_chao_fabrica", "Lenda do Chão de Fábrica", 14, RarityDef.LEGENDARY, "+12% global e +5 qualidade. Prestígio.", globalSpeedPct = 12, qualityBonus = 5),
     )
 
     val tools = listOf(
@@ -162,8 +166,36 @@ object GameProgression {
     fun companySkillPoints(level: Int, owned: Set<String>): Int =
         (level / 2 - owned.size).coerceAtLeast(0)
 
-    fun playerSkillPoints(level: Int, owned: Set<String>): Int =
-        (1 + level / 3 - owned.size).coerceAtLeast(0)
+    data class XpProgress(val level: Int, val current: Long, val needed: Long, val total: Long) {
+        val fraction: Float get() =
+            if (needed <= 0L) 1f else (current.toDouble() / needed.toDouble()).toFloat().coerceIn(0f, 1f)
+    }
+
+    fun playerXpNeededForLevel(level: Int): Long {
+        val l = level.coerceAtLeast(1).toLong()
+        return 600L + (l - 1L) * 300L + (l - 1L) * (l - 1L) * 45L
+    }
+
+    fun playerProgress(totalXp: Long): XpProgress {
+        var remaining = totalXp.coerceAtLeast(0L)
+        var level = 1
+        while (level < 100) {
+            val needed = playerXpNeededForLevel(level)
+            if (remaining < needed) return XpProgress(level, remaining, needed, totalXp.coerceAtLeast(0L))
+            remaining -= needed
+            level++
+        }
+        return XpProgress(100, 1, 1, totalXp.coerceAtLeast(0L))
+    }
+
+    fun playerSkillPoints(companyLevel: Int, playerXp: Long, owned: Set<String>): Int {
+        val playerLevel = playerProgress(playerXp).level
+        return (1 + playerLevel / 2 + companyLevel / 6 - owned.size).coerceAtLeast(0)
+    }
+
+    fun characterXpForContract(difficulty: Int, quantity: Int, requiredQuality: Int): Long =
+        90L + difficulty.coerceIn(1, 10) * 75L + quantity.coerceIn(1, 2_000) / 4L +
+            requiredQuality.coerceIn(0, 100) * 2L
 
     fun canUnlock(skill: SkillDef, level: Int, owned: Set<String>): Boolean =
         level >= skill.minLevel && (skill.prerequisite == null || skill.prerequisite in owned)
@@ -248,6 +280,10 @@ object GameProgression {
             grinding *= 1.0 + it.grindingPct / 100.0
             welding *= 1.0 + it.weldingPct / 100.0
             cnc *= 1.0 + it.cncPct / 100.0
+        }
+
+        if (expansion.remoteHireEndsAt > currentTimeMillis() && expansion.remoteHireBoostPct > 0) {
+            speed += expansion.remoteHireBoostPct.coerceAtMost(25) / 100.0
         }
 
         return ProductionModifiers(

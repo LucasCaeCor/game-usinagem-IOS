@@ -177,7 +177,7 @@ final class LocalSaveV23Adapter {
         let workLife = dict(prefs["workLife"])
 
         var out = ""
-        out += row(["VERSION", 3])
+        out += row(["VERSION", 4])
         out += row([
             "COMPANY",
             string(company["name"], "Minha Usinagem"),
@@ -223,7 +223,7 @@ final class LocalSaveV23Adapter {
         ])
 
         out += row([
-            "EXP3",
+            "EXP4",
             string(expansion["specialty"], "generalista"),
             encodeSet(stringArray(expansion["companySkills"])),
             encodeSet(stringArray(expansion["playerSkills"])),
@@ -241,7 +241,91 @@ final class LocalSaveV23Adapter {
             encodeSet(stringArray(expansion["premiumMachines"])),
             i64(expansion["playerXp"], 0),
             i64(expansion["lastDailyTicketDay"], -1),
+            encodeSet(stringArray(expansion["claimedRentalXpIds"])),
+            string(expansion["remoteHireOwnerUid"], ""),
+            string(expansion["remoteHireName"], ""),
+            int(expansion["remoteHireBoostPct"], 0),
+            i64(expansion["remoteHireEndsAt"], 0),
         ])
+
+        let mainPlayer = "__main_player__"
+        let preciseFatigueForV24 = parseDoubleMap(string(workLife["preciseFatigue"], ""))
+        let integerFatigueForV24 = parseIntMap(string(workLife["fatigue"], ""))
+        let restingForV24 = parseLongMap(string(workLife["resting"], ""))
+        out += row([
+            "WORKLIFE4",
+            bool(workLife["autoRest"], true),
+            preciseFatigueForV24[mainPlayer] ?? Double(integerFatigueForV24[mainPlayer] ?? 0),
+            restingForV24[mainPlayer] ?? 0,
+        ])
+
+        out += row([
+            "CAREER4",
+            int(active["manualOps"], 0),
+            int(active["assistedOps"], 0),
+            int(active["perfectOps"], 0),
+            int(active["approvedBatches"], 0),
+            int(active["shippedBatches"], 0),
+            int(active["reworkedBatches"], 0),
+            int(active["scrappedBatches"], 0),
+            int(active["bestScore"], 0),
+            int(active["streak"], 0),
+            int(active["skillPoints"], 1),
+            string(active["productionPolicy"], "BALANCED"),
+            i64(active["lastOperationAt"], 0),
+            encodeSet(stringArray(active["milestones"])),
+            encodeSet(stringArray(active["achievements"])),
+        ])
+
+        let masteryEntries = stringArray(active["masteryXp"])
+        var masteryMap: [String: Int] = [:]
+        for token in masteryEntries {
+            let pair = token.split(separator: "=", maxSplits: 1)
+            if pair.count == 2, let value = Int(pair[1]) {
+                masteryMap[String(pair[0])] = value
+            }
+        }
+        out += row([
+            "CAREER_SKILLS4",
+            encodeSet(stringArray(active["industrialSkills"])),
+            encodeIntMap(masteryMap),
+        ])
+
+        let activeBatch = string(active["activeBatch"], "")
+        if !activeBatch.isEmpty {
+            let b = activeBatch.components(separatedBy: "§")
+            if b.count >= 15 {
+                out += row([
+                    "CAREER_BATCH4",
+                    b[0], b[1], b[2], b[3], b[4],
+                    Int(b[5]) ?? 1,
+                    Int(b[6]) ?? 50,
+                    Int(b[7]) ?? 0,
+                    Int(b[8]) ?? 0,
+                    Int(b[9]) ?? 0,
+                    b[10] == "1",
+                    b[11] == "1",
+                    Int(b[12]) ?? 0,
+                    Int64(b[13]) ?? 0,
+                    Int64(b[14]) ?? 0,
+                ])
+            }
+        }
+
+        for mission in objectArray(root["legendaryMissions"]).sorted(by: objectIdSort) {
+            out += row([
+                "LM4",
+                string(mission["id"], ""),
+                string(mission["legendaryCode"], ""),
+                string(mission["title"], ""),
+                string(mission["description"], ""),
+                string(mission["metric"], ""),
+                i64(mission["target"], 0),
+                i64(mission["progress"], 0),
+                i64(mission["rewardCents"], 0),
+                bool(mission["claimed"], false),
+            ])
+        }
 
         out += row([
             "PROFILE3",
@@ -258,9 +342,9 @@ final class LocalSaveV23Adapter {
             bool(profile["onboardingComplete"], false),
         ])
 
-        let preciseFatigue = parseDoubleMap(string(workLife["preciseFatigue"], ""))
-        let integerFatigue = parseIntMap(string(workLife["fatigue"], ""))
-        let resting = parseLongMap(string(workLife["resting"], ""))
+        let preciseFatigue = preciseFatigueForV24
+        let integerFatigue = integerFatigueForV24
+        let resting = restingForV24
 
         for machine in objectArray(root["machines"]).sorted(by: objectIdSort) {
             let androidCondition = int(machine["condition"], 100)
@@ -510,7 +594,7 @@ final class LocalSaveV23Adapter {
         var game = dict(preferences["game"])
         var profile = dict(preferences["profile"])
         var expansion = dict(preferences["expansion"])
-        let activeGameplay = dict(preferences["activeGameplay"])
+        var activeGameplay = dict(preferences["activeGameplay"])
         var workLife = dict(preferences["workLife"])
 
         if let settings = rows.first(where: { $0.first == "SETTINGS" }) {
@@ -556,7 +640,7 @@ final class LocalSaveV23Adapter {
             profile["onboardingComplete"] = boolean(p, 11, false)
         }
 
-        if let e = rows.first(where: { $0.first == "EXP3" }) {
+        if let e = rows.first(where: { $0.first == "EXP4" || $0.first == "EXP3" }) {
             expansion["specialty"] = text(e, 1, "generalista")
             expansion["companySkills"] = Array(decodeSet(text(e, 2, ""))).sorted()
             expansion["playerSkills"] = Array(decodeSet(text(e, 3, ""))).sorted()
@@ -573,7 +657,80 @@ final class LocalSaveV23Adapter {
             expansion["premiumMachines"] = Array(decodeSet(text(e, 13, ""))).sorted()
             expansion["playerXp"] = long(e, 14, 0)
             expansion["lastDailyTicketDay"] = long(e, 15, -1)
+            if e.first == "EXP4" {
+                expansion["claimedRentalXpIds"] = Array(decodeSet(text(e, 16, ""))).sorted()
+                let remoteOwner = text(e, 17, "")
+                let remoteName = text(e, 18, "")
+                expansion["remoteHireOwnerUid"] = remoteOwner.isEmpty ? NSNull() : remoteOwner
+                expansion["remoteHireName"] = remoteName.isEmpty ? NSNull() : remoteName
+                expansion["remoteHireBoostPct"] = integer(e, 19, 0)
+                expansion["remoteHireEndsAt"] = long(e, 20, 0)
+            }
         }
+
+        // Carreira industrial V20/V24.
+        if let c = rows.first(where: { $0.first == "CAREER4" }) {
+            activeGameplay["manualOps"] = integer(c, 1, 0)
+            activeGameplay["assistedOps"] = integer(c, 2, 0)
+            activeGameplay["perfectOps"] = integer(c, 3, 0)
+            activeGameplay["approvedBatches"] = integer(c, 4, 0)
+            activeGameplay["shippedBatches"] = integer(c, 5, 0)
+            activeGameplay["reworkedBatches"] = integer(c, 6, 0)
+            activeGameplay["scrappedBatches"] = integer(c, 7, 0)
+            activeGameplay["bestScore"] = integer(c, 8, 0)
+            activeGameplay["streak"] = integer(c, 9, 0)
+            activeGameplay["skillPoints"] = integer(c, 10, 1)
+            activeGameplay["productionPolicy"] = text(c, 11, "BALANCED")
+            activeGameplay["lastOperationAt"] = long(c, 12, 0)
+            activeGameplay["milestones"] = Array(decodeSet(text(c, 13, ""))).sorted()
+            activeGameplay["achievements"] = Array(decodeSet(text(c, 14, ""))).sorted()
+        }
+        if let c = rows.first(where: { $0.first == "CAREER_SKILLS4" }) {
+            activeGameplay["industrialSkills"] = Array(decodeSet(text(c, 1, ""))).sorted()
+            let mastery = decodeIntMap(text(c, 2, ""))
+            activeGameplay["masteryXp"] = mastery.keys.sorted().map {
+                "\($0)=\(mastery[$0] ?? 0)"
+            }
+        }
+        if let b = rows.first(where: { $0.first == "CAREER_BATCH4" }) {
+            activeGameplay["activeBatch"] = [
+                text(b, 1, ""),
+                text(b, 2, ""),
+                text(b, 3, ""),
+                text(b, 4, ""),
+                text(b, 5, "MACHINED"),
+                String(integer(b, 6, 1)),
+                String(integer(b, 7, 50)),
+                String(integer(b, 8, 0)),
+                String(integer(b, 9, 0)),
+                String(integer(b, 10, 0)),
+                boolean(b, 11, false) ? "1" : "0",
+                boolean(b, 12, false) ? "1" : "0",
+                String(integer(b, 13, 0)),
+                String(long(b, 14, 0)),
+                String(long(b, 15, 0)),
+            ].joined(separator: "§")
+        } else {
+            activeGameplay["activeBatch"] = NSNull()
+        }
+
+        let oldMissions = indexById(objectArray(root["legendaryMissions"]))
+        var mergedMissions = oldMissions
+        for m in rows where m.first == "LM4" {
+            let id = text(m, 1, "")
+            mergedMissions[id] = [
+                "id": id,
+                "legendaryCode": text(m, 2, ""),
+                "title": text(m, 3, ""),
+                "description": text(m, 4, ""),
+                "metric": text(m, 5, ""),
+                "target": long(m, 6, 0),
+                "progress": long(m, 7, 0),
+                "rewardCents": long(m, 8, 0),
+                "claimed": boolean(m, 9, false),
+            ]
+        }
+        root["legendaryMissions"] = Array(mergedMissions.values).sorted(by: objectIdSort)
 
         var fatigue: [String: Double] = [:]
         var resting: [String: Int64] = [:]
@@ -582,10 +739,16 @@ final class LocalSaveV23Adapter {
             fatigue[id] = double(r, 11, 0)
             resting[id] = long(r, 12, 0)
         }
+        if let w = rows.first(where: { $0.first == "WORKLIFE4" }) {
+            fatigue["__main_player__"] = double(w, 2, 0)
+            resting["__main_player__"] = long(w, 3, 0)
+            workLife["autoRest"] = boolean(w, 1, true)
+        } else if workLife["autoRest"] == nil {
+            workLife["autoRest"] = true
+        }
         workLife["preciseFatigue"] = encodeDoublePipeMap(fatigue)
         workLife["fatigue"] = encodeIntPipeMap(fatigue.mapValues { Int($0.rounded()) })
         workLife["resting"] = encodeLongPipeMap(resting)
-        if workLife["autoRest"] == nil { workLife["autoRest"] = true }
 
         preferences["game"] = game
         preferences["profile"] = profile

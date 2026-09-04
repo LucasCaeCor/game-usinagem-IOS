@@ -7,30 +7,6 @@ import br.com.usinagemmaster.domain.model.MachineRuntime
 import br.com.usinagemmaster.domain.model.ProductionSnapshot
 import kotlin.math.roundToInt
 
-data class ProductionModifiers(
-    val globalSpeedMultiplier: Double = 1.0,
-    val energyMultiplier: Double = 1.0,
-    val qualityBonus: Int = 0,
-    val turningMultiplier: Double = 1.0,
-    val millingMultiplier: Double = 1.0,
-    val drillingMultiplier: Double = 1.0,
-    val grindingMultiplier: Double = 1.0,
-    val weldingMultiplier: Double = 1.0,
-    val cncMultiplier: Double = 1.0,
-) {
-    fun multiplierForMachine(machineType: String): Double {
-        val type = machineType.uppercase()
-        var value = 1.0
-        if ("LATHE" in type || "TURN" in type) value *= turningMultiplier
-        if ("MILL" in type || "MACHINING_CENTER" in type) value *= millingMultiplier
-        if ("DRILL" in type) value *= drillingMultiplier
-        if ("GRINDER" in type || "GRIND" in type) value *= grindingMultiplier
-        if ("WELD" in type) value *= weldingMultiplier
-        if ("CNC" in type || "MACHINING_CENTER" in type || "EDM" in type) value *= cncMultiplier
-        return value
-    }
-}
-
 object ProductionEngine {
     private const val SALE_VALUE_PER_UNIT_CENTS = 1_250.0
     private const val ENERGY_PRICE_PER_KWH_CENTS = 110.0
@@ -45,6 +21,7 @@ object ProductionEngine {
             .filter { it.assignedMachineId != null }
             .associateBy { it.assignedMachineId!! }
 
+        // Lendários de suporte melhoram a fábrica inteira mesmo sem operar máquina.
         val supportProductivityMultiplier = 1.0 + employees.sumOf {
             when (it.legendaryCode) {
                 "magrao" -> 0.05
@@ -92,7 +69,7 @@ object ProductionEngine {
                 else -> 1.0
             }
             val legendaryBonus = legendaryMachineMultiplier(employee.legendaryCode, machine.machineType)
-            val expansionMachineMultiplier = modifiers.multiplierForMachine(machine.machineType)
+        val expansionMachineMultiplier = modifiers.multiplierForMachine(machine.machineType)
 
             val units = definition.baseProductionPerHour *
                 condition * levelBonus * skillBonus * moraleBonus * specialtyBonus * traitBonus *
@@ -112,8 +89,8 @@ object ProductionEngine {
                     employee.skillLevel * 1.5 +
                     qualityTrait +
                     supportQualityBonus +
-                    modifiers.qualityBonus
-            ).roundToInt().coerceIn(1, 100)
+            modifiers.qualityBonus
+        ).roundToInt().coerceIn(1, 100)
 
             MachineProduction(
                 machineId = machine.id,

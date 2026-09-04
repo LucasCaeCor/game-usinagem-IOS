@@ -51,6 +51,7 @@ private val bottomTabs = listOf(
 @Composable
 fun GameApp(store: GameStore) {
     var screen by remember { mutableStateOf(Screen.HOME) }
+    var enteredFactory by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(store) {
@@ -73,6 +74,29 @@ fun GameApp(store: GameStore) {
     }
 
     UsinagemMasterTheme {
+        if (!enteredFactory) {
+            AndroidV24MainMenu(
+                store = store,
+                onEnter = {
+                    screen = Screen.HOME
+                    enteredFactory = true
+                },
+                onProfile = {
+                    screen = Screen.PROFILE
+                    enteredFactory = true
+                },
+                onCommunity = {
+                    screen = Screen.COMMUNITY
+                    enteredFactory = true
+                },
+                onSettings = {
+                    screen = Screen.SETTINGS
+                    enteredFactory = true
+                },
+            )
+            return@UsinagemMasterTheme
+        }
+
         Scaffold(
             containerColor = Steel950,
             topBar = {
@@ -206,8 +230,37 @@ private fun HomeScreen(
                 }
                 Spacer(Modifier.height(8.dp))
                 WarehouseBar(d.usedWarehouseSpace, d.warehouseSpace)
+                var rename by remember { mutableStateOf(false) }
+                TextButton(onClick = { rename = true }) { Text("Renomear empresa") }
+                if (rename) {
+                    var name by remember { mutableStateOf(store.state.company.name) }
+                    AlertDialog(
+                        onDismissRequest = { rename = false },
+                        title = { Text("Nome da empresa") },
+                        text = {
+                            OutlinedTextField(
+                                value = name,
+                                onValueChange = { name = it.take(36) },
+                                singleLine = true,
+                                label = { Text("Empresa") },
+                            )
+                        },
+                        confirmButton = {
+                            Button(onClick = {
+                                store.renameCompany(name)
+                                rename = false
+                            }) { Text("Salvar") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { rename = false }) { Text("Cancelar") }
+                        },
+                    )
+                }
             }
         }
+
+        item { AndroidWorkLifeHomeCard(store) }
+        item { AndroidDashboardProgress(store) }
 
         if (store.pendingCargo.isNotEmpty()) {
             item {
@@ -389,6 +442,7 @@ private fun FactoryScreen(
                 }
             }
 
+            item { OwnerCareerPanel(store) }
             item { FactoryStudio(store, modifier = Modifier.padding(horizontal = 2.dp)) }
 
             item {
@@ -594,6 +648,12 @@ private fun EmployeesScreen(store: GameStore) {
             }
         }
 
+        item {
+            AndroidWorkLifeHomeCard(store)
+            Spacer(Modifier.height(10.dp))
+            LegendaryEmployeesPanel(store)
+        }
+
         items(store.state.employees) { employee ->
             val isIdle = idle?.id == employee.id
             IndustrialCard(
@@ -786,7 +846,7 @@ private fun ProgressionScreen(store: GameStore) {
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                listOf("METAS", "GALPÃO", "ESPECIALIDADE", "PESQUISA").forEach {
+                listOf("METAS", "GALPÃO", "ESPECIALIDADE", "PESQUISA", "CARREIRA").forEach {
                     FilterChip(selected = tab == it, onClick = { tab = it }, label = { Text(it) })
                 }
             }
@@ -851,6 +911,9 @@ private fun ProgressionScreen(store: GameStore) {
                         onUnlock = { store.unlockCompanySkill(skill.id) },
                     )
                 }
+            }
+            "CARREIRA" -> {
+                item { IndustrialCareerTree(store) }
             }
         }
     }
@@ -947,7 +1010,7 @@ private fun ProfileScreen(
             "SKILLS" -> {
                 item {
                     Text(
-                        "Pontos: ${GameProgression.playerSkillPoints(store.state.company.companyLevel, store.state.expansion.playerSkills)}",
+                        "Pontos: ${GameProgression.playerSkillPoints(store.state.company.companyLevel, store.state.expansion.playerXp, store.state.expansion.playerSkills)}",
                         fontWeight = FontWeight.Black,
                     )
                 }
@@ -975,6 +1038,7 @@ private fun ProfileScreen(
                 }
             }
             "PERSONAGENS" -> {
+                item { PrestigeCharacterNotice(store) }
                 item {
                     AssistChip(onClick = { store.equipCharacter(null) }, label = { Text("Sem personagem bônus") })
                 }
@@ -1154,7 +1218,7 @@ private fun MoreScreen(onOpen: (Screen) -> Unit) {
                 Triple(Screen.MACHINES, "Máquinas", "Parque fabril instalado e manutenção"),
                 Triple(Screen.STORE, "Loja", "Catálogo de máquinas e tecnologia premium"),
                 Triple(Screen.FINANCE, "Finanças", "Caixa e lançamentos"),
-                Triple(Screen.PROGRESSION, "Empresa e pesquisa", "Metas, galpão, especialidade e skills"),
+                Triple(Screen.PROGRESSION, "Empresa, pesquisa e carreira", "Metas, galpão e árvore industrial"),
                 Triple(Screen.PROFILE, "Meu personagem", "Avatar, skins, personagens e skills"),
                 Triple(Screen.ROULETTE, "Roleta Industrial", "Roda animada e recompensas"),
                 Triple(Screen.MINIGAME, "Desafio de precisão", "Recompensa e impulsos"),

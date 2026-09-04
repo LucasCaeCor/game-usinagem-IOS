@@ -18,7 +18,7 @@ import kotlin.random.Random
 private const val SAVE_KEY = "usinagemmaster.kmp.save.v6" // mantém o save criado pela V6.
 private const val CYCLE_MILLIS = 10L * 60L * 1000L
 private const val MAX_OFFLINE_MILLIS = 24L * 60L * 60L * 1000L
-private const val REST_MILLIS = 60L * 60L * 1000L
+private const val REST_MILLIS = 2L * 60L * 60L * 1000L
 
 private const val DAILY_BOOST_TOKENS = 2
 private const val MINIGAME_COOLDOWN_MILLIS = 15L * 60L * 1000L
@@ -437,7 +437,7 @@ class GameStore {
                 state.workforce.copy(idleEmployeeId = null, idleSinceAt = 0L, idleUntilAt = 0L)
             } else state.workforce,
         )
-        notify("Funcionário enviado para a Copa por 1 hora.")
+        notify("Funcionário enviado para a Copa por 2 horas.")
         persistAndRefresh()
     }
 
@@ -587,7 +587,7 @@ class GameStore {
     fun unlockPlayerSkill(id: String) {
         val def = GameProgression.playerSkills.firstOrNull { it.id == id } ?: return
         if (id in state.expansion.playerSkills) return
-        if (GameProgression.playerSkillPoints(state.company.companyLevel, state.expansion.playerSkills) <= 0) {
+        if (GameProgression.playerSkillPoints(state.company.companyLevel, state.expansion.playerXp, state.expansion.playerSkills) <= 0) {
             return notify("Sem pontos do personagem.")
         }
         if (!GameProgression.canUnlock(def, state.company.companyLevel, state.expansion.playerSkills)) {
@@ -614,13 +614,16 @@ class GameStore {
         persistAndRefresh()
     }
 
-    fun spinGacha() {
-        if (state.expansion.gachaTickets <= 0) return notify("Você não tem fichas da roleta.")
+    fun spinGacha(): GachaRewardDef? {
+        if (state.expansion.gachaTickets <= 0) {
+            notify("Você não tem fichas da roleta.")
+            return null
+        }
         val random = Random(currentTimeMillis() + idCounter)
         val epicPity = state.expansion.pityEpic + 1
         val legendaryPity = state.expansion.pityLegendary + 1
-        val forcedLegendary = legendaryPity >= 80
-        val forcedEpic = epicPity >= 30
+        val forcedLegendary = legendaryPity >= 100
+        val forcedEpic = epicPity >= 40
         val roll = random.nextInt(10_000)
 
         val reward = when {
@@ -628,10 +631,10 @@ class GameStore {
             forcedEpic -> gachaByMinimumRarity(RarityDef.EPIC, random)
             roll < 80 -> gachaByMinimumRarity(RarityDef.LEGENDARY, random) // 0,8%
             roll < 450 -> gachaByMinimumRarity(RarityDef.EPIC, random)     // +3,7%
-            roll < 1_050 -> randomPremiumMachine(random)                    // +6,0%
-            roll < 2_250 -> randomCharacter(random)                         // +12%
-            roll < 4_050 -> randomSkin(random)                              // +18%
-            roll < 6_450 -> randomTool(RarityDef.RARE, random)              // +24%
+            roll < 1_250 -> randomPremiumMachine(random)                    // +8,0%
+            roll < 3_050 -> randomCharacter(random)                         // +18%
+            roll < 5_250 -> randomSkin(random)                              // +22%
+            roll < 7_650 -> randomTool(RarityDef.RARE, random)              // +24%
             else -> randomTool(RarityDef.COMMON, random)                    // restante; ficha nunca é prêmio
         }
 
@@ -645,6 +648,7 @@ class GameStore {
         lastGachaReward = reward
         notify("Roleta • ${reward.rarity.label}: ${reward.title}")
         persistAndRefresh()
+        return reward
     }
 
     fun equipSkin(id: String) {
@@ -680,6 +684,398 @@ class GameStore {
         persist()
     }
 
+    fun renameCompany(name: String) {
+        val clean = name.trim().take(36)
+        if (clean.length < 3) return notify("O nome da empresa precisa ter pelo menos 3 caracteres.")
+        state = state.copy(company = state.company.copy(name = clean))
+        notify("Empresa renomeada para $clean.")
+        persist()
+    }
+
+    fun setAutoRest(enabled: Boolean) {
+        state = state.copy(autoRest = enabled)
+        notify(if (enabled) "Descanso automático ativado." else "Descanso automático desativado.")
+        persist()
+    }
+
+    fun returnEmployeeFromBreak(id: String) {
+        state = state.copy(
+            employees = state.employees.map {
+                if (it.id == id) it.copy(restingUntil = 0L) else it
+            }
+        )
+        notify("Funcionário retornou ao posto.")
+        persistAndRefresh()
+    }
+
+    fun restPlayer() {
+        state = state.copy(playerRestingUntil = currentTimeMillis() + REST_MILLIS)
+        notify("Você foi para a Copa por 2 horas.")
+        persist()
+    }
+
+    fun returnPlayerFromBreak() {
+        state = state.copy(playerRestingUntil = 0L)
+        notify("Você voltou ao chão de fábrica.")
+        persist()
+    }
+
+    fun hireLegendaryEmployee() {
+        val hired = state.employees.mapNotNull { it.legendaryCode }.toSet()
+        val available = LegendaryEmployeeCatalog.all.filter {
+            it.unlockLevel <= state.company.companyLevel && it.code !in hired
+        }
+        if (available.isEmpty()) {
+            val nextLevel = LegendaryEmployeeCatalog.all
+                .filter { it.code !in hired }
+                .minOfOrNull { it.unlockLevel }
+            return notify(
+                if (nextLevel != null && nextLevel > state.company.companyLevel)
+                    "Próximo funcionário lendário libera no nível $nextLevel da empresa."
+                else
+                    "Todos os funcionários lendários disponíveis já foram contratados."
+            )
+        }
+
+        val affordable = available.filter { it.salaryCents <= state.company.cashCents }
+        if (affordable.isEmpty()) return notify("Caixa insuficiente para os lendários liberados.")
+
+        val random = Random(currentTimeMillis() + idCounter++)
+        val def = affordable.random(random)
+        val employee = EmployeeSave(
+            id = newId("legendary"),
+            name = def.name,
+            specialty = def.specialty,
+            skillLevel = def.skillLevel,
+            salaryCents = def.salaryCents,
+            morale = def.morale,
+            trait = def.trait,
+            legendaryCode = def.code,
+        )
+        val mission = seedLegendaryMission(def.code)
+        state = state.copy(
+            company = state.company.copy(cashCents = state.company.cashCents - def.salaryCents),
+            employees = state.employees + employee,
+            legendaryMissions = if (mission != null && state.legendaryMissions.none { it.id == mission.id }) {
+                state.legendaryMissions + mission
+            } else state.legendaryMissions,
+            finances = addFinance(
+                state.finances,
+                "EXPENSE",
+                "SALARY",
+                def.salaryCents,
+                "Contratação lendária: ${def.name}",
+            ),
+        )
+        notify("${def.name} entrou para sua equipe lendária.")
+        persistAndRefresh()
+    }
+
+    fun claimLegendaryMission(id: String) {
+        val mission = state.legendaryMissions.firstOrNull { it.id == id }
+            ?: return notify("Missão lendária não encontrada.")
+        if (mission.claimed) return notify("Recompensa já coletada.")
+        if (mission.progress < mission.target) return notify("Missão lendária ainda não concluída.")
+
+        state = state.copy(
+            company = state.company.copy(cashCents = state.company.cashCents + mission.rewardCents),
+            legendaryMissions = state.legendaryMissions.map {
+                if (it.id == id) it.copy(claimed = true) else it
+            },
+            finances = addFinance(
+                state.finances,
+                "INCOME",
+                "BONUS",
+                mission.rewardCents,
+                "Missão lendária: ${mission.title}",
+            ),
+        )
+        notify("${mission.title}: ${money(mission.rewardCents)} coletados.")
+        persist()
+    }
+
+    fun operateMachine(
+        machineId: String,
+        contractId: String,
+        result: MinigameResult,
+        manual: Boolean = true,
+    ) {
+        if (state.career.activeBatch != null) {
+            return notify("Finalize ou descarte o lote atual antes de iniciar outro.")
+        }
+        val machine = state.machines.firstOrNull { it.id == machineId }
+            ?: return notify("Máquina não encontrada.")
+        if (machine.condition <= 80) return notify("Faça manutenção antes de operar.")
+        val contract = state.contracts.firstOrNull {
+            it.id == contractId && it.status == "ACTIVE" && it.completedQuantity < it.quantity
+        } ?: return notify("Escolha um contrato ativo.")
+
+        val career = state.career
+        val mastery = career.mastery(machine.machineType)
+        val score = result.normalizedScore
+        val quantity = if (manual) {
+            suggestedManualQuantity(machine.machineType, score, mastery, career)
+        } else {
+            (suggestedManualQuantity(machine.machineType, .42f, mastery, career) * .62)
+                .roundToInt().coerceAtLeast(1)
+        }
+        val quality = (
+            46 +
+                score * 46f +
+                mastery.qualityBonus +
+                career.manualQualityBonus() -
+                result.mistakes * 4
+            ).roundToInt().coerceIn(35, 100)
+        val now = currentTimeMillis()
+        val batch = OwnerWorkBatchSave(
+            id = newId("owner_batch"),
+            machineId = machine.id,
+            machineType = machine.machineType,
+            contractId = contract.id,
+            stage = ProductionStage.MACHINED.name,
+            producedQuantity = quantity,
+            quality = quality,
+            precision = (result.precision.coerceIn(0f, 1f) * 100).roundToInt(),
+            speed = (result.speed.coerceIn(0f, 1f) * 100).roundToInt(),
+            mistakes = result.mistakes.coerceAtLeast(0),
+            perfect = manual && result.perfect,
+            manual = manual,
+            createdAt = now,
+            updatedAt = now,
+        )
+        val masteryGain = if (manual) 35 + (score * 85).roundToInt() else 18
+        val masteryXp = career.masteryXp.toMutableMap().apply {
+            this[machine.machineType] = (this[machine.machineType] ?: 0) + masteryGain
+        }
+        var nextCareer = career.copy(
+            activeBatch = batch,
+            masteryXp = masteryXp,
+            totalManualOperations = career.totalManualOperations + if (manual) 1 else 0,
+            assistedOperations = career.assistedOperations + if (manual) 0 else 1,
+            perfectOperations = career.perfectOperations + if (manual && result.perfect) 1 else 0,
+            bestScore = max(career.bestScore, (score * 100).roundToInt()),
+            operationStreak = if (manual && score >= .72f) career.operationStreak + 1 else 0,
+            lastOperationAt = now,
+        )
+        nextCareer = updateCareerRewards(nextCareer)
+
+        val xp = if (manual) 30L + (score * 70).toLong() else 12L
+        state = state.copy(
+            career = nextCareer,
+            expansion = state.expansion.copy(playerXp = state.expansion.playerXp + xp),
+        )
+        syncCareerPrestigeCharacters()
+        notify(
+            if (manual)
+                "Lote usinado: $quantity pç • Q$quality. Agora leve ao Q (Qualidade)."
+            else
+                "Ciclo assistido: $quantity pç. Leve o lote ao Q."
+        )
+        persistAndRefresh()
+    }
+
+    fun moveOwnerBatchToQuality() {
+        val batch = state.career.activeBatch ?: return notify("Nenhum lote ativo.")
+        if (batch.stage !in setOf(ProductionStage.MACHINED.name, ProductionStage.WAITING_QC.name)) {
+            return notify("O lote não está pronto para ir à Qualidade.")
+        }
+        state = state.copy(
+            career = state.career.copy(
+                activeBatch = batch.copy(stage = ProductionStage.QC.name, updatedAt = currentTimeMillis())
+            )
+        )
+        notify("Lote no Controle de Qualidade. Faça a medição dimensional.")
+        persist()
+    }
+
+    fun inspectOwnerBatch(approve: Boolean) {
+        val batch = state.career.activeBatch ?: return notify("Nenhum lote ativo.")
+        if (batch.stage !in setOf(ProductionStage.QC.name, ProductionStage.WAITING_QC.name)) {
+            return notify("Leve o lote à Qualidade primeiro.")
+        }
+        val contract = state.contracts.firstOrNull { it.id == batch.contractId }
+            ?: return notify("Contrato não encontrado.")
+        val shouldApprove = batch.quality >= contract.requiredQuality
+        val approved = approve && shouldApprove
+        val nextStage = if (approved) ProductionStage.APPROVED else ProductionStage.REWORK
+        var career = state.career.copy(
+            activeBatch = batch.copy(stage = nextStage.name, updatedAt = currentTimeMillis()),
+            approvedBatches = state.career.approvedBatches + if (approved) 1 else 0,
+            reworkedBatches = state.career.reworkedBatches + if (approved) 0 else 1,
+        )
+        career = updateCareerRewards(career)
+        state = state.copy(career = career)
+        notify(if (approved) "Lote aprovado. Leve ao P (Embalagem)." else "Retrabalho necessário. Volte à máquina.")
+        persist()
+    }
+
+    fun reworkOwnerBatch(result: MinigameResult) {
+        val batch = state.career.activeBatch ?: return notify("Nenhum lote ativo.")
+        if (batch.stage != ProductionStage.REWORK.name) return notify("Lote não está em retrabalho.")
+        val score = result.normalizedScore
+        val improved = (8 + score * 22 - result.mistakes * 3).roundToInt()
+        val now = currentTimeMillis()
+        val updated = batch.copy(
+            stage = ProductionStage.MACHINED.name,
+            quality = (batch.quality + improved).coerceIn(35, 100),
+            precision = max(batch.precision, (result.precision * 100).roundToInt()),
+            speed = ((batch.speed + (result.speed * 100).roundToInt()) / 2).coerceIn(0, 100),
+            mistakes = batch.mistakes + result.mistakes,
+            perfect = batch.perfect && result.perfect,
+            reworkCount = batch.reworkCount + 1,
+            updatedAt = now,
+        )
+        val masteryXp = state.career.masteryXp.toMutableMap().apply {
+            this[batch.machineType] = (this[batch.machineType] ?: 0) + 24 + (score * 50).roundToInt()
+        }
+        var career = state.career.copy(
+            activeBatch = updated,
+            masteryXp = masteryXp,
+            totalManualOperations = state.career.totalManualOperations + 1,
+            lastOperationAt = now,
+        )
+        career = updateCareerRewards(career)
+        state = state.copy(
+            career = career,
+            expansion = state.expansion.copy(
+                playerXp = state.expansion.playerXp + 20L + (score * 45).toLong()
+            ),
+        )
+        syncCareerPrestigeCharacters()
+        notify("Retrabalho concluído • Q${updated.quality}. Leve novamente à Qualidade.")
+        persist()
+    }
+
+    fun packOwnerBatch() {
+        val batch = state.career.activeBatch ?: return notify("Nenhum lote ativo.")
+        if (batch.stage != ProductionStage.APPROVED.name) return notify("A Qualidade precisa aprovar o lote.")
+        state = state.copy(
+            career = state.career.copy(
+                activeBatch = batch.copy(
+                    stage = ProductionStage.READY_TO_SHIP.name,
+                    updatedAt = currentTimeMillis(),
+                )
+            )
+        )
+        notify("${batch.producedQuantity} peça(s) embaladas. Leve ao E (Expedição).")
+        persist()
+    }
+
+    fun shipOwnerBatch() {
+        val batch = state.career.activeBatch ?: return notify("Nenhum lote ativo.")
+        if (batch.stage != ProductionStage.READY_TO_SHIP.name) return notify("Embale o lote antes de expedir.")
+        val contract = state.contracts.firstOrNull { it.id == batch.contractId }
+            ?: return notify("Contrato do lote não encontrado.")
+        if (contract.status != "ACTIVE") return notify("Contrato não está mais ativo.")
+        if (batch.quality < contract.requiredQuality) return notify("O lote não atingiu a qualidade mínima.")
+
+        val remaining = (contract.quantity - contract.completedQuantity).coerceAtLeast(0)
+        if (remaining <= 0) return notify("Esse contrato já foi concluído.")
+        val applied = batch.producedQuantity.coerceAtMost(remaining)
+        val newCompleted = contract.completedQuantity + applied
+        val complete = newCompleted >= contract.quantity
+        val commercialPct = state.career.commercialCompletionBonusPct()
+        val reward = if (complete && !contract.rewardPaid) contract.rewardCents else 0L
+        val bonus = reward * commercialPct.coerceIn(0, 25) / 100L
+
+        var expansion = state.expansion.copy(
+            playerXp = state.expansion.playerXp +
+                if (complete) GameProgression.characterXpForContract(
+                    contract.difficulty,
+                    contract.quantity,
+                    contract.requiredQuality,
+                ) else 0L
+        )
+        if (complete) expansion = consumeBoundTool(expansion, contract.id)
+
+        var finances = state.finances
+        if (reward > 0L) {
+            finances = addFinance(
+                finances, "INCOME", "CONTRACT", reward,
+                "Contrato concluído pelo dono: ${contract.clientName}"
+            )
+        }
+        if (bonus > 0L) {
+            finances = addFinance(
+                finances, "INCOME", "BONUS", bonus,
+                "Bônus comercial: ${contract.clientName}"
+            )
+        }
+
+        var career = state.career.copy(
+            activeBatch = null,
+            shippedBatches = state.career.shippedBatches + 1,
+        )
+        career = updateCareerRewards(career)
+
+        state = state.copy(
+            company = state.company.copy(
+                cashCents = state.company.cashCents + reward + bonus,
+                reputation = state.company.reputation + if (complete && !contract.rewardPaid) contract.reputationReward else 0,
+            ),
+            contracts = state.contracts.map {
+                if (it.id != contract.id) it else it.copy(
+                    completedQuantity = if (complete) it.quantity else newCompleted,
+                    productionProgressMilli = if (complete) it.quantity * 1000L
+                        else max(it.productionProgressMilli, newCompleted * 1000L),
+                    status = if (complete) "COMPLETED" else it.status,
+                    rewardPaid = if (complete) true else it.rewardPaid,
+                )
+            },
+            finances = finances,
+            expansion = expansion,
+            career = career,
+        )
+        syncCareerPrestigeCharacters()
+        updateCompanyLevel()
+        ensureContracts()
+        notify(
+            "Expedido: $applied pç em ${contract.clientName}" +
+                if (reward > 0L) " • CONTRATO PAGO" else ""
+        )
+        persistAndRefresh()
+    }
+
+    fun scrapOwnerBatch() {
+        val batch = state.career.activeBatch ?: return notify("Nenhum lote ativo.")
+        var career = state.career.copy(
+            activeBatch = null,
+            scrappedBatches = state.career.scrappedBatches + 1,
+        )
+        career = updateCareerRewards(career)
+        state = state.copy(career = career)
+        notify("${batch.producedQuantity} peça(s) refugadas; nenhuma peça foi creditada.")
+        persist()
+    }
+
+    fun abandonOwnerBatch() {
+        if (state.career.activeBatch == null) return
+        state = state.copy(career = state.career.copy(activeBatch = null))
+        notify("Lote manual descartado.")
+        persist()
+    }
+
+    fun unlockIndustrialSkill(id: String) {
+        val def = IndustrialSkillCatalog.byId(id) ?: return notify("Skill industrial inválida.")
+        if (!IndustrialSkillCatalog.canUnlock(def, state.career, state.company.companyLevel)) {
+            return notify("Pré-requisito, nível ou pontos insuficientes.")
+        }
+        state = state.copy(
+            career = state.career.copy(unlockedSkills = state.career.unlockedSkills + id)
+        )
+        notify("${def.name} aprendida.")
+        persistAndRefresh()
+    }
+
+    fun setProductionPolicy(policy: ProductionPolicy) {
+        if (policy != ProductionPolicy.BALANCED && !state.career.hasSkill("diretor_industrial")) {
+            return notify("Políticas avançadas liberam com Diretor industrial.")
+        }
+        state = state.copy(career = state.career.copy(productionPolicy = policy.name))
+        notify("Política: ${policy.label}.")
+        persistAndRefresh()
+    }
+
     fun resetSave() {
         PlatformSaveStorage.remove(SAVE_KEY)
         state = createInitial()
@@ -691,6 +1087,103 @@ class GameStore {
         ensureContracts()
         refreshFactoryInput()
         notify("Novo jogo iniciado.")
+    }
+
+    private fun updateCareerRewards(input: CareerSave): CareerSave {
+        var career = input
+        val marks = career.milestones.toMutableSet()
+        var points = career.earnedSkillPoints
+
+        fun award(id: String, amount: Int) {
+            if (marks.add(id)) points += amount
+        }
+
+        if (career.totalManualOperations >= 1) award("manual_1", 1)
+        if (career.totalManualOperations >= 10) award("manual_10", 1)
+        if (career.totalManualOperations >= 25) award("manual_25", 1)
+        if (career.totalManualOperations >= 50) award("manual_50", 1)
+        if (career.totalManualOperations >= 100) award("manual_100", 2)
+        if (career.totalManualOperations >= 250) award("manual_250", 2)
+        if (career.perfectOperations >= 5) award("perfect_5", 1)
+        if (career.perfectOperations >= 20) award("perfect_20", 2)
+        if (career.approvedBatches >= 10) award("approved_10", 1)
+        if (career.shippedBatches >= 20) award("shipped_20", 2)
+        if (career.reworkedBatches >= 10) award("rework_10", 1)
+        if (career.masteryXp.values.any { MachineMastery("x", it).level >= 10 }) {
+            award("mastery_10", 2)
+        }
+
+        val achievements = career.achievements.toMutableSet()
+        if (career.totalManualOperations >= 1) achievements += "Primeiro cavaco"
+        if (career.perfectOperations >= 1) achievements += "Peça perfeita"
+        if (career.bestScore >= 95) achievements += "Na medida"
+        if (career.operationStreak >= 5) achievements += "Ritmo de oficina"
+        if (career.approvedBatches >= 25) achievements += "Zero surpresa"
+        if (career.shippedBatches >= 50) achievements += "Dono põe a mão na massa"
+        if (career.masteryXp.values.any { MachineMastery("x", it).level >= 20 }) {
+            achievements += "Mestre de máquina"
+        }
+
+        career = career.copy(
+            milestones = marks,
+            achievements = achievements,
+            earnedSkillPoints = points,
+        )
+        return career
+    }
+
+    private fun syncCareerPrestigeCharacters() {
+        val career = state.career
+        val grants = buildSet {
+            if (career.totalManualOperations >= 100) add("mestre_torneiro")
+            if (career.perfectOperations >= 25) add("inspetor_zero")
+            if (career.masteryXp.values.any { it >= 900 }) add("programadora_cnc")
+            if (career.shippedBatches >= 100 && career.perfectOperations >= 40) add("mestre_5_eixos")
+            if (career.shippedBatches >= 250 && career.totalManualOperations >= 500) add("lenda_chao_fabrica")
+        }
+        if (grants.isNotEmpty()) {
+            state = state.copy(
+                expansion = state.expansion.copy(
+                    ownedCharacters = state.expansion.ownedCharacters + grants
+                )
+            )
+        }
+    }
+
+    private fun advanceLegendaryMissions(
+        save: GameSave,
+        snapshot: ProductionSnapshot,
+        operatingIds: Set<String>,
+        elapsedMinutes: Long,
+    ): List<LegendaryMissionSave> {
+        if (save.legendaryMissions.isEmpty()) return save.legendaryMissions
+        val machineById = save.machines.associateBy { it.id }
+        val operatingTypes = save.machines
+            .filter { it.id in operatingIds }
+            .map { it.machineType }
+            .toSet()
+
+        return save.legendaryMissions.map { mission ->
+            if (mission.claimed || mission.progress >= mission.target) return@map mission
+            val definition = LegendaryMissionCatalog.byId(mission.id) ?: return@map mission
+            val employee = save.employees.firstOrNull {
+                it.legendaryCode == definition.legendaryCode
+            } ?: return@map mission
+            val assignedType = employee.assignedMachineId
+                ?.let(machineById::get)
+                ?.machineType
+
+            val delta = legendaryMissionProgressDelta(
+                definition = definition,
+                legendaryEmployeeCode = employee.legendaryCode,
+                assignedMachineType = assignedType,
+                operatingMachineTypes = operatingTypes,
+                operatingMachines = snapshot.operatingMachines,
+                averageQuality = snapshot.averageQuality,
+                elapsedMinutes = elapsedMinutes,
+            )
+            mission.copy(progress = (mission.progress + delta).coerceAtMost(mission.target))
+        }
     }
 
     private fun simulateOffline() {
@@ -725,6 +1218,9 @@ class GameStore {
                     employees = working.employees.map {
                         WorkLifeRules.afterClosedShift(it, 10)
                     },
+                    playerFatigue = (
+                        working.playerFatigue - 8.5 * (10.0 / 60.0)
+                    ).coerceIn(0.0, 100.0),
                     contracts = working.contracts.map {
                         if (it.status == "ACTIVE") it.copy(deadlineAt = it.deadlineAt + CYCLE_MILLIS) else it
                     },
@@ -829,7 +1325,7 @@ class GameStore {
         }
 
         val employees = working.employees.map { employee ->
-            when {
+            val advanced = when {
                 WorkLifeRules.resting(employee, eventTime) -> WorkLifeRules.afterRest(employee, 10)
                 employee.assignedMachineId in operatingIds -> {
                     val newExperience = employee.experience + 10L
@@ -845,7 +1341,44 @@ class GameStore {
                     workHours = 10.0 / 60.0, pausedHours = 0.0, restHours = 0.0,
                 )
             }
+            if (
+                working.shiftMode == ShiftMode.CONTINUOUS_24H &&
+                working.autoRest &&
+                employee.assignedMachineId != null &&
+                advanced.fatigue >= 88.0 &&
+                advanced.restingUntil <= eventTime
+            ) {
+                advanced.copy(restingUntil = eventTime + REST_MILLIS)
+            } else advanced
         }
+
+        val playerResting = working.playerRestingUntil > eventTime
+        val playerFatigue = if (playerResting) {
+            (
+                working.playerFatigue - 28.0 * (10.0 / 60.0)
+            ).coerceIn(0.0, 100.0)
+        } else {
+            (
+                working.playerFatigue +
+                    (if (working.shiftMode == ShiftMode.CONTINUOUS_24H) 6.5 else 4.0) *
+                    (10.0 / 60.0)
+            ).coerceIn(0.0, 100.0)
+        }
+        val playerRestingUntil = if (
+            working.shiftMode == ShiftMode.CONTINUOUS_24H &&
+            working.autoRest &&
+            playerFatigue >= 88.0 &&
+            working.playerRestingUntil <= eventTime
+        ) {
+            eventTime + REST_MILLIS
+        } else working.playerRestingUntil
+
+        val missionProgress = advanceLegendaryMissions(
+            save = working.copy(employees = employees),
+            snapshot = snapshot,
+            operatingIds = operatingIds,
+            elapsedMinutes = 10L,
+        )
 
         var penalty = 0L
         var reputationLoss = 0
@@ -885,6 +1418,9 @@ class GameStore {
             cargo = cargo.takeLast(300),
             finances = finances,
             expansion = expansion,
+            legendaryMissions = missionProgress,
+            playerFatigue = playerFatigue,
+            playerRestingUntil = playerRestingUntil,
         )
     }
 
@@ -917,11 +1453,19 @@ class GameStore {
                 ?: emptySet()
         }
 
+        val baseModifiers = GameProgression.modifiers(save.expansion)
         val base = ProductionEngine.calculate(
             machines = machineRuntime,
             employees = employeeRuntime,
             idleEmployeeIds = idleIds,
-            modifiers = GameProgression.modifiers(save.expansion),
+            modifiers = baseModifiers.copy(
+                globalSpeedMultiplier =
+                    baseModifiers.globalSpeedMultiplier * save.career.automationSpeedMultiplier(),
+                qualityBonus =
+                    baseModifiers.qualityBonus + save.career.automationQualityBonus(),
+                energyMultiplier =
+                    baseModifiers.energyMultiplier * save.career.energyMultiplier(),
+            ),
         )
 
         val adjustedMachines = base.machineProduction.map { mp ->
@@ -1269,6 +1813,25 @@ class GameStore {
         if (save.workforce.nextIdleCheckAt <= 0L) {
             save = save.copy(workforce = save.workforce.copy(nextIdleCheckAt = randomIdleCheckAt(currentTimeMillis())))
         }
+        val existingMissionIds = save.legendaryMissions.map { it.id }.toMutableSet()
+        val seededMissions = save.legendaryMissions.toMutableList()
+        save.employees.mapNotNull { it.legendaryCode }.distinct().forEach { code ->
+            seedLegendaryMission(code)?.let { mission ->
+                if (existingMissionIds.add(mission.id)) seededMissions += mission
+            }
+        }
+        val sanitizedCareer = save.career.copy(
+            earnedSkillPoints = save.career.earnedSkillPoints.coerceAtLeast(1),
+            productionPolicy = runCatching {
+                ProductionPolicy.valueOf(save.career.productionPolicy)
+            }.getOrDefault(ProductionPolicy.BALANCED).name,
+        )
+        save = save.copy(
+            schemaVersion = 4,
+            legendaryMissions = seededMissions,
+            career = sanitizedCareer,
+            playerFatigue = save.playerFatigue.coerceIn(0.0, 100.0),
+        )
         state = save
         updateCompanyLevel()
         normalizeUnlockedSkins()
@@ -1340,7 +1903,7 @@ class GameStore {
     }
 
     private fun persist() {
-        state = state.copy(schemaVersion = 3)
+        state = state.copy(schemaVersion = 4)
         PlatformSaveStorage.write(SAVE_KEY, GameSaveCodec.encode(state))
     }
 

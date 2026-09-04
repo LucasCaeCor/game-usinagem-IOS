@@ -111,6 +111,61 @@ data class ExpansionSave(
     val premiumMachines: Set<String> = emptySet(),
     val playerXp: Long = 0L,
     val lastDailyTicketDay: Long = -1L,
+    val claimedRentalXpIds: Set<String> = emptySet(),
+    val remoteHireOwnerUid: String? = null,
+    val remoteHireName: String? = null,
+    val remoteHireBoostPct: Int = 0,
+    val remoteHireEndsAt: Long = 0L,
+)
+
+data class LegendaryMissionSave(
+    val id: String,
+    val legendaryCode: String,
+    val title: String,
+    val description: String,
+    val metric: String,
+    val target: Long,
+    val progress: Long = 0L,
+    val rewardCents: Long,
+    val claimed: Boolean = false,
+)
+
+data class OwnerWorkBatchSave(
+    val id: String,
+    val machineId: String,
+    val machineType: String,
+    val contractId: String,
+    val stage: String,
+    val producedQuantity: Int,
+    val quality: Int,
+    val precision: Int,
+    val speed: Int,
+    val mistakes: Int,
+    val perfect: Boolean,
+    val manual: Boolean,
+    val reworkCount: Int = 0,
+    val createdAt: Long,
+    val updatedAt: Long,
+)
+
+data class CareerSave(
+    val activeBatch: OwnerWorkBatchSave? = null,
+    val masteryXp: Map<String, Int> = emptyMap(),
+    val unlockedSkills: Set<String> = emptySet(),
+    val milestones: Set<String> = emptySet(),
+    val achievements: Set<String> = emptySet(),
+    val totalManualOperations: Int = 0,
+    val assistedOperations: Int = 0,
+    val perfectOperations: Int = 0,
+    val approvedBatches: Int = 0,
+    val shippedBatches: Int = 0,
+    val reworkedBatches: Int = 0,
+    val scrappedBatches: Int = 0,
+    val bestScore: Int = 0,
+    val operationStreak: Int = 0,
+    val earnedSkillPoints: Int = 1,
+    val productionPolicy: String = "BALANCED",
+    val lastOperationAt: Long = 0L,
 )
 
 data class PlayerProfileSave(
@@ -142,7 +197,7 @@ data class WorkforceSave(
 )
 
 data class GameSave(
-    val schemaVersion: Int = 3,
+    val schemaVersion: Int = 4,
     val company: CompanySave,
     val machines: List<MachineSave> = emptyList(),
     val employees: List<EmployeeSave> = emptyList(),
@@ -150,11 +205,16 @@ data class GameSave(
     val cargo: List<ProductionCargoSave> = emptyList(),
     val finances: List<FinanceSave> = emptyList(),
     val goals: List<GoalSave> = emptyList(),
+    val legendaryMissions: List<LegendaryMissionSave> = emptyList(),
+    val career: CareerSave = CareerSave(),
     val expansion: ExpansionSave = ExpansionSave(),
     val profile: PlayerProfileSave = PlayerProfileSave(),
     val uiSettings: UiSettingsSave = UiSettingsSave(),
     val workforce: WorkforceSave = WorkforceSave(),
     val shiftMode: ShiftMode = ShiftMode.DAY_12H,
+    val autoRest: Boolean = true,
+    val playerFatigue: Double = 0.0,
+    val playerRestingUntil: Long = 0L,
     val boostTokens: Int = 2,
     val snackUntil: Long = 0L,
     val lastDailyBonusDay: Long = -1L,
