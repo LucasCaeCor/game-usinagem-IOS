@@ -36,12 +36,26 @@ fun PlayerAvatarPreview(
         contentAlignment = Alignment.Center
     ) {
         Canvas(Modifier.fillMaxSize()) {
-            drawCircle(Color(0xFFFFB21A).copy(alpha = .08f), radius = this.size.minDimension * .42f, center = center)
-            drawLine(Color.White.copy(alpha = .06f), Offset(size.width * .12f, size.height * .82f), Offset(size.width * .88f, size.height * .82f), 2f)
+            // PlayerAvatarPreview também possui um parâmetro chamado `size: Dp`.
+            // Capture explicitamente DrawScope.size para não deixar o parâmetro
+            // externo sombrear o tamanho real do Canvas no Kotlin/Native.
+            val canvasSize = this.size
+
+            drawCircle(
+                Color(0xFFFFB21A).copy(alpha = .08f),
+                radius = canvasSize.minDimension * .42f,
+                center = center
+            )
+            drawLine(
+                Color.White.copy(alpha = .06f),
+                Offset(canvasSize.width * .12f, canvasSize.height * .82f),
+                Offset(canvasSize.width * .88f, canvasSize.height * .82f),
+                2f
+            )
             drawPlayerAvatarFigure(
-                base = Offset(size.width * .5f, size.height * .80f),
+                base = Offset(canvasSize.width * .5f, canvasSize.height * .80f),
                 avatar = avatar,
-                scale = size.minDimension / 118f,
+                scale = canvasSize.minDimension / 118f,
                 phase = phase,
                 walking = false,
                 carrying = false
