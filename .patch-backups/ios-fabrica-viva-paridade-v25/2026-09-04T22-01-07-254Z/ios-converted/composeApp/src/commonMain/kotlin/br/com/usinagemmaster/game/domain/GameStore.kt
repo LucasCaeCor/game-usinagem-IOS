@@ -222,17 +222,7 @@ class GameStore {
 
     fun reprimandIdleEmployee() {
         val employee = idleEmployee ?: return notify("Ninguém está no celular agora.")
-        reprimandEmployee(employee.id)
-    }
-
-    /** Paridade Fábrica Viva Android: a bronca pertence ao funcionário tocado na cena. */
-    fun reprimandEmployee(id: String) {
-        val employee = state.employees.firstOrNull { it.id == id }
-            ?: return notify("Funcionário não encontrado.")
         val now = currentTimeMillis()
-        if (state.workforce.idleEmployeeId != id || state.workforce.idleUntilAt <= now) {
-            return notify("${employee.name} já está no posto.")
-        }
         state = state.copy(
             workforce = state.workforce.copy(
                 idleEmployeeId = null,
@@ -242,7 +232,7 @@ class GameStore {
             ),
         )
         notify("${employee.name} voltou ao posto. Nova tolerância por 1 hora.")
-        persistAndRefresh()
+        persist()
     }
 
     fun startCargoDelivery() {
@@ -405,41 +395,6 @@ class GameStore {
             } else state.workforce,
         )
         notify("${employee.name} desligado da equipe.")
-        persistAndRefresh()
-    }
-
-    /** Paridade do diálogo de máquina Android: troca direta de operador pela máquina tocada. */
-    fun assignEmployeeToMachine(employeeId: String, machineId: String) {
-        val machine = state.machines.firstOrNull { it.id == machineId }
-            ?: return notify("Máquina não encontrada.")
-        val employee = state.employees.firstOrNull { it.id == employeeId }
-            ?: return notify("Funcionário não encontrado.")
-        if (!machine.installed) return notify("Instale a máquina antes de atribuir um operador.")
-
-        state = state.copy(
-            employees = state.employees.map { current ->
-                when {
-                    current.id == employee.id -> current.copy(assignedMachineId = machine.id)
-                    current.assignedMachineId == machine.id -> current.copy(assignedMachineId = null)
-                    else -> current
-                }
-            }
-        )
-        notify("${employee.name} atribuído a ${machineName(machine.machineType)}.")
-        persistAndRefresh()
-    }
-
-    fun clearMachineOperator(machineId: String) {
-        val machine = state.machines.firstOrNull { it.id == machineId }
-            ?: return notify("Máquina não encontrada.")
-        val operator = state.employees.firstOrNull { it.assignedMachineId == machineId }
-        if (operator == null) return notify("Essa máquina já está sem operador.")
-        state = state.copy(
-            employees = state.employees.map {
-                if (it.assignedMachineId == machineId) it.copy(assignedMachineId = null) else it
-            }
-        )
-        notify("Operador removido de ${machineName(machine.machineType)}.")
         persistAndRefresh()
     }
 

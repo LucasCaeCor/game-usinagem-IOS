@@ -1,0 +1,7 @@
+V25 PARITY MANIFEST
+- FactoryStudio.kt: interactive KMP factory scene + owner/worker/machine UX + visual pass
+- GameStore.kt: directed reprimand + direct machine operator assignment/removal
+- FactorySimulation.kt: verified, not modified
+- FactoryOwnerSimulation.kt: verified, not modified
+- AndroidV24Gameplay.kt: verified, not modified
+- PersistentGameModels.kt schema 4: verified, not modified
