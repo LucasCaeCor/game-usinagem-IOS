@@ -16,6 +16,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     ) -> Bool {
         FirebaseApp.configure()
         FirebaseAccountService.shared.refreshCachedLabel()
+        FirebaseCommunityService.shared.start()
 
         NotificationCenter.default.addObserver(
             self,
@@ -28,6 +29,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         self.window = window
 
         if Auth.auth().currentUser != nil {
+            FirebaseCommunityService.shared.refreshAll()
             showGame(animated: false)
         } else {
             showLogin(animated: false)
@@ -50,11 +52,17 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
 
         controller.onAuthenticated = { [weak self] in
             FirebaseAccountService.shared.refreshCachedLabel()
+            FirebaseCommunityService.shared.refreshAll(
+                message: "Login concluído. Procurando sua fábrica vinculada…"
+            )
             self?.showGame(animated: true)
         }
 
         controller.onContinueOffline = { [weak self] in
             FirebaseAccountService.shared.refreshCachedLabel()
+            FirebaseCommunityService.shared.refreshAll(
+                message: "Login concluído. Procurando sua fábrica vinculada…"
+            )
             self?.showGame(animated: true)
         }
 

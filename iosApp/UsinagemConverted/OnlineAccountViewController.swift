@@ -20,6 +20,15 @@ final class OnlineAccountViewController: UIViewController {
         )
 
         configure()
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(communityUpdated),
+            name: Notification.Name("UsinagemCommunityDidUpdate"),
+            object: nil
+        )
+
+        FirebaseCommunityService.shared.refreshAll()
         render()
     }
 
@@ -72,7 +81,11 @@ final class OnlineAccountViewController: UIViewController {
         if let user = FirebaseAccountService.shared.currentUser {
             let name = user.displayName ?? "Conta Google"
             let email = user.email ?? "e-mail não informado"
-            status.text = "\(name)\n\(email)\n\nFirebase UID\n\(user.uid)"
+            let linked = UserDefaults.standard.string(
+                forKey: FirebaseCommunityService.linkedCompanyKey
+            )
+            let linkedText = linked.map { "\n\nFábrica vinculada\n\($0)" } ?? ""
+            status.text = "\(name)\n\(email)\n\nFirebase UID\n\(user.uid)\(linkedText)"
 
             primaryButton.setTitle("Conta Google conectada", for: .normal)
             primaryButton.setTitleColor(
@@ -147,6 +160,11 @@ final class OnlineAccountViewController: UIViewController {
         )
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
+    }
+
+    @objc private func communityUpdated() {
+        FirebaseAccountService.shared.refreshCachedLabel()
+        render()
     }
 
     @objc private func close() {

@@ -83,7 +83,11 @@ fun GameApp(store: GameStore) {
                 )
             },
             bottomBar = {
-                NavigationBar(containerColor = Steel900, tonalElevation = 8.dp) {
+                NavigationBar(
+                    modifier = Modifier.navigationBarsPadding(),
+                    containerColor = Steel900,
+                    tonalElevation = 8.dp,
+                ) {
                     bottomTabs.forEach { destination ->
                         val selected = screen == destination ||
                             (destination == Screen.MORE && screen !in bottomTabs.dropLast(1))
@@ -134,7 +138,10 @@ private fun IndustrialTopBar(
 ) {
     Surface(color = Steel900, tonalElevation = 6.dp) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -1069,36 +1076,7 @@ private fun PrecisionMinigameScreen(store: GameStore) {
 
 @Composable
 private fun CommunityScreen(store: GameStore) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                PlayerAvatarPreview(store.state.profile, size = 110.dp)
-                Column(Modifier.weight(1f)) {
-                    Text(store.state.profile.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                    Text(store.state.company.name)
-                    Text("Nível ${store.state.company.companyLevel} • REP ${store.state.company.reputation}")
-                    Text("${one(store.production.totalUnitsPer10Minutes)} pç/10min")
-                }
-            }
-        }
-        item {
-            IndustrialCard("Modo offline completo", "Seu progresso local não depende do Firebase") {
-                StatePill("SAVE LOCAL ATIVO", ProductionGreen)
-                Text("Máquinas, contratos, fábrica, carga, equipe, personagem, economia e progressão continuam funcionando sem login.")
-            }
-        }
-        item {
-            IndustrialCard("Multiplayer assíncrono", "Camada opcional do Android") {
-                StatePill("FIREBASE iOS NÃO CONFIGURADO", SafetyAmber)
-                Text("Ranking, presença, visitas a outras fábricas e envio de apoio exigem cadastrar o bundle iOS no mesmo projeto Firebase e fornecer GoogleService-Info.plist.")
-                Text("A integração online não é simulada: sem credencial iOS, nenhuma ação falsa é exibida.")
-            }
-        }
-    }
+    OnlineCommunityScreen(store)
 }
 
 @Composable

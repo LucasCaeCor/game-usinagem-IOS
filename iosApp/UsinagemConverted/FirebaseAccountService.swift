@@ -89,6 +89,9 @@ final class FirebaseAccountService {
                 }
 
                 self?.refreshCachedLabel()
+                FirebaseCommunityService.shared.refreshAll(
+                    message: "Conta Google conectada. Consultando sua fábrica antiga…"
+                )
                 completion(.success(firebaseUser))
             }
         }
@@ -100,6 +103,7 @@ final class FirebaseAccountService {
             try Auth.auth().signOut()
             GIDSignIn.sharedInstance.signOut()
             refreshCachedLabel()
+            FirebaseCommunityService.shared.clear()
             return nil
         } catch {
             return error
