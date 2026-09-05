@@ -1,66 +1,144 @@
-USINAGEM MASTER — FIX V26 (UI/UX + FÁBRICA VIVA)
-===================================================
+USINAGEM MASTER — iOS/KMP — V27.1 OVERHAUL VISUAL + GAME FEEL
+================================================================
 
-FOCO DA V26
------------
-Esta versão ataca os problemas de visual, legibilidade e interação citados pelo usuário:
+Esta V27 é a revisão completa pedida para não deixar a experiência pela metade.
+Ela parte do projeto iOS/KMP real enviado pelo usuário e reaproveita a lógica Android/V25.2.
 
-- Fábrica Viva menos inclinada e com área útil melhor aproveitada.
-- HUD mais compacta e menos poluída.
-- Ações do turno mais claras.
-- Operadores com frases no card selecionado.
-- Lista técnica com seleção do operador disponível até o mais experiente.
-- Botão para “Melhor operador” e para “Auto distribuir” toda a equipe.
-- Modo foco com temporizador e bloqueio enquanto ativo.
-- Timer para ficha diária e bônus diário.
-- “Rouleta” corrigido para “Roleta”.
-- Lendários deixam de ser contratados diretamente; agora a função avisa que eles são obtidos apenas por Roleta/Missões.
-- Valor de dinheiro com separador de milhar (ex.: R$ 2.533.703,69).
-
-O QUE A V26 ALTERA DIRETAMENTE
-------------------------------
-- FactoryStudio.kt
-- GameStore.kt
-- rótulos literais em arquivos .kt (quando encontrar “Rouleta” e “Contratar lendário”)
-
-OBSERVAÇÃO IMPORTANTE
----------------------
-A V26 é um passe visual/funcional seguro sobre o núcleo KMP atual.
-Ela NÃO altera:
-- save KMP V4;
-- economia principal;
-- contratos;
-- sincronização Firebase/Cloud Save;
-- engine de produção.
-
-SOBRE SOM E EFEITOS
+ENTREGAS PRINCIPAIS
 -------------------
-Esta V26 reforça feedback visual (HUD, destaques, timers, estado do operador e leitura do turno).
-Se a sua branch atual não tiver uma camada multiplataforma de áudio já definida, o patch não injeta um player nativo do zero.
-Ou seja: melhora a sensação visual e a leitura da cena agora, sem arriscar quebrar o build com integração de áudio ad-hoc.
+1. FÁBRICA VIVA
+- câmera mais frontal/ortogonal, menos inclinada;
+- viewport maior e pan/zoom preservados;
+- toque em máquinas, operadores, Q/P/E;
+- efeitos de máquina rodando, CNC, cavaco, laser/plasma/solda;
+- fala em balão sobre operadores, incluindo frases próprias dos lendários;
+- fluxo do dono visualmente explícito: MÁQUINA -> Q -> P -> E;
+- áudio ambiente e efeitos vinculados ao estado real de produção.
+
+2. ÁUDIO / FEEDBACK
+- factory_ambient.wav (fonte Android do próprio projeto);
+- machine_tick.wav (Android);
+- weld_spark.wav (Android);
+- ui_click.wav;
+- machine_start.wav;
+- quality_pass.wav;
+- reward_sting.wav;
+- haptic iOS quando habilitado.
+
+3. HOME / DASHBOARD
+- landing “Entrar na fábrica” refeita com máquinas e operadores ao fundo;
+- cards compactos com desenho/ícone da categoria;
+- hierarquia visual reduzindo a parede de informação;
+- caixa/carga/produção/contratos/equipe/evolução/roleta organizados por contexto;
+- texto claro sobre fundo escuro.
+
+4. MÁQUINAS / LOJA / GALPÃO
+- arte vetorial distinta por família de máquina;
+- a Loja mostra a forma da máquina antes da compra;
+- parque instalado usa a mesma linguagem visual;
+- editor de layout em grade, baia por baia;
+- Auto Layout por família/valor tecnológico.
+
+5. EQUIPE / LISTA TÉCNICA
+- score de encaixe por especialidade, experiência, skill, moral, fadiga e traço;
+- “Melhor operador” por máquina;
+- “Auto distribuir” toda a equipe;
+- lista ordenada: disponível primeiro, depois melhor encaixe/experiência;
+- retratos dos funcionários usando o avatar vetorial;
+- foco com cronômetro e sem acumular tempo.
+
+6. ROLETA
+- grafia ROLETA corrigida;
+- setores com símbolos vetoriais explícitos;
+- setor de Equipe Lendária;
+- números/textos claros;
+- áudio/haptic na rotação e na recompensa;
+- timer da ficha diária;
+- pity preservado.
+
+7. LENDÁRIOS
+- removida a contratação direta da interface;
+- hireLegendaryEmployee() não compra mais ninguém;
+- lendários entram no pool LENDÁRIO da Roleta;
+- duplicatas continuam bloqueadas;
+- ao ganhar, o funcionário é criado e a missão lendária correspondente nasce junto.
+
+8. TALENTOS / STORYBOARD
+- pesquisa da empresa em jornada visual ligada por nós;
+- skills do personagem no mesmo padrão;
+- carreira industrial de 31 skills separada por ramos e tiers;
+- pré-requisitos, custo, nível e progresso aparecem no contexto do nó.
+
+9. PERSONAGEM
+- ajustes finos de proporção, respiração/idle, ombros, uniforme, orelhas,
+  sobrancelhas, olhos, nariz, expressão e detalhes faciais;
+- estilos Tatuzão, Princesa, Pinóquio, Magrão, Kendão, Treme-treme e Bêbado preservados;
+- não adiciona campos ao save.
+
+10. ECONOMIA / TIMERS
+- dinheiro: R$ 2.533.703,69;
+- timer do bônus diário;
+- timer da ficha diária;
+- timer do modo foco;
+- foco não pode ser reativado/acumulado enquanto ativo.
+
+SEGURANÇA
+---------
+NÃO altera PersistentGameModels.kt.
+NÃO altera GameSaveCodec.
+NÃO altera schema 4.
+NÃO altera Cloud Save/Firebase/Auth.
+NÃO reseta dinheiro, contratos, máquinas ou progresso.
+Cria backup automático em .patch-backups/ios-overhaul-visual-gamefeel-v27/.
 
 COMO APLICAR
 ------------
-Extraia o ZIP mantendo a pasta payload.
+Extraia o ZIP inteiro. Na raiz do game-usinagem-IOS:
 
-Na raiz do game-usinagem-IOS:
-
-    node aplicar-ios-ui-ux-fabrica-viva-v26.mjs
+    node aplicar-ios-overhaul-visual-gamefeel-v27.mjs
 
 Ou:
 
-    node aplicar-ios-ui-ux-fabrica-viva-v26.mjs --root "C:\caminho\game-usinagem-IOS"
+    node aplicar-ios-overhaul-visual-gamefeel-v27.mjs --root "C:\Users\PC-NOVO\Desktop\game-usinagem-IOS"
+
+Antes de alterar:
+
+    node aplicar-ios-overhaul-visual-gamefeel-v27.mjs --dry-run
+
+Depois de aplicar:
+
+    node aplicar-ios-overhaul-visual-gamefeel-v27.mjs --check
+
+Depois faça commit/push e rode o GitHub Actions iOS.
+
+VALIDAÇÃO DE DESENVOLVIMENTO
+----------------------------
+- verificação sintática Kotlin executada nos arquivos alterados: sem erros de parser;
+- checagem de marcadores/APIs entre GameApp, FactoryStudio e GameStore;
+- aplicação do .mjs testada em cópia limpa do projeto;
+- o ambiente usado para montar a fix não conseguiu baixar o Gradle pela rede, portanto o gate
+  final Kotlin/Native continua sendo o workflow macOS/GitHub Actions do próprio projeto.
+
+
+HOTFIX KOTLIN/NATIVE V27.1
+---------------------------
+O GitHub Actions da V27 revelou duas incompatibilidades reais de Compose:
+
+1) AndroidV24ParityUi.kt usava BorderStroke sem importar:
+   androidx.compose.foundation.BorderStroke
+
+2) FactoryStudio.kt chamava a sobrecarga errada:
+   drawText(measurer, layout, ...)
+
+   A V27.1 usa a sobrecarga compatível com o TextLayoutResult já medido:
+   drawText(layout, ...)
+
+Essas correções não removem nenhuma funcionalidade da V27 e não alteram save, economia, engine, Cloud Save ou Firebase.
+
+APLICAR
+-------
+node aplicar-ios-overhaul-visual-gamefeel-v27-1.mjs --root "C:\caminho\game-usinagem-IOS"
 
 VALIDAR
--------
-
-    node aplicar-ios-ui-ux-fabrica-viva-v26.mjs --check
-
-SIMULAR
--------
-
-    node aplicar-ios-ui-ux-fabrica-viva-v26.mjs --dry-run
-
-DEPOIS
-------
-Faça commit/push e rode novamente o GitHub Actions / build iOS.
+--------
+node aplicar-ios-overhaul-visual-gamefeel-v27-1.mjs --root "C:\caminho\game-usinagem-IOS" --check

@@ -728,7 +728,7 @@ private fun DrawScope.drawSpeechBubbleV27(at: Offset, text: String, measurer: an
     val top = at.y.coerceIn(6f, size.height - h - 6f)
     drawRoundRect(Steel950.copy(alpha=.95f), Offset(left,top), Size(w,h), CornerRadius(scale*.28f))
     drawRoundRect(ElectricBlue.copy(alpha=.72f), Offset(left,top), Size(w,h), CornerRadius(scale*.28f), style=Stroke((scale*.055f).coerceAtLeast(1f)))
-    drawText(measurer, layout, topLeft = Offset(left+pad, top+pad*.7f))
+    drawText(layout, topLeft = Offset(left+pad, top+pad*.7f))
 }
 
 private fun DrawScope.drawZone(at: Offset, scale: Float, color: Color) {
