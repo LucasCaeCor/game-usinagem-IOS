@@ -45,7 +45,6 @@ import br.com.usinagemmaster.core.util.Formatters
 import br.com.usinagemmaster.domain.catalog.MachineCatalog
 import br.com.usinagemmaster.domain.simulation.*
 import br.com.usinagemmaster.game.domain.GameStore
-import br.com.usinagemmaster.game.domain.currentTimeMillis
 import br.com.usinagemmaster.game.domain.MachineMinigameCatalog
 import br.com.usinagemmaster.game.domain.MinigameKind
 import br.com.usinagemmaster.game.domain.MinigameResult
@@ -62,7 +61,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-private const val FACTORY_STUDIO_V27 = "factory_studio_v27_3"
+private const val FACTORY_STUDIO_V27 = "factory_studio_v27_2"
 
 @Composable
 fun FactoryStudio(
