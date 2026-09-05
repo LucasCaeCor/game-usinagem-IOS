@@ -65,7 +65,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-private const val FACTORY_STUDIO_V27 = "factory_studio_v28_dynamic"
+private const val FACTORY_STUDIO_V27 = "factory_studio_v28_1_camera_space"
 
 @Composable
 fun FactoryStudio(
@@ -96,7 +96,13 @@ fun FactoryStudio(
     val sceneFloor = remember(machineInputs, store.factoryGridColumns, store.factoryGridRows) {
         FactoryFloor(machineInputs, store.factoryGridColumns, store.factoryGridRows)
     }
-    val sceneHeight = (560 + store.factoryExpansionStage * 38).coerceIn(560, 900).dp
+    // V28.1: o viewport cresce com as dimensões físicas do galpão, não com um estágio abstrato.
+    // Isso impede um galpão grande de continuar espremido dentro do mesmo quadrado visual.
+    val sceneHeight = (
+        500 +
+            (store.factoryGridRows - 6).coerceAtLeast(0) * 42 +
+            (store.factoryGridColumns - 5).coerceAtLeast(0) * 10
+        ).coerceIn(620, 1180).dp
 
     val transition = rememberInfiniteTransition(label = "factory_studio_v25")
     val workPhase by transition.animateFloat(
@@ -215,7 +221,7 @@ fun FactoryStudio(
                     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    SmallZoomButton(if (cameraMode) "INTERAGIR" else "CÂMERA") { cameraMode = !cameraMode }
+                    SmallZoomButton(if (cameraMode) "INTERAGIR" else "MOVER") { cameraMode = !cameraMode }
                     SmallZoomButton("−") { zoom = (zoom - .25f).coerceIn(.65f, 5.5f) }
                     SmallZoomButton("${(zoom * 100).toInt()}%") { zoom = 1f; pan = Offset.Zero }
                     SmallZoomButton("+") { zoom = (zoom + .25f).coerceIn(.65f, 5.5f) }
@@ -231,17 +237,51 @@ fun FactoryStudio(
                     .height(sceneHeight)
                     .background(Steel950, RoundedCornerShape(18.dp))
                     .border(1.dp, Steel700, RoundedCornerShape(18.dp))
+                    // V28.1 — pinça de dois dedos funciona SEMPRE, inclusive no modo INTERAGIR.
+                    // Só consumimos o gesto quando existem 2+ ponteiros; um toque continua chegando
+                    // aos hit-targets Compose reais das máquinas e operadores.
+                    .pointerInput(sceneFloor.width, sceneFloor.height) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            var event = awaitPointerEvent()
+                            while (event.changes.any { it.pressed }) {
+                                val pressed = event.changes.filter { it.pressed }
+                                if (pressed.size >= 2) {
+                                    val oldZoom = zoom
+                                    val zoomChange = event.calculateZoom()
+                                    val newZoom = (oldZoom * zoomChange).coerceIn(.65f, 5.5f)
+                                    val panChange = event.calculatePan()
+                                    val centroid = Offset(
+                                        pressed.sumOf { it.position.x.toDouble() }.div(pressed.size).toFloat(),
+                                        pressed.sumOf { it.position.y.toDouble() }.div(pressed.size).toFloat(),
+                                    )
+                                    val base = studioBaseTile(size.width.toFloat(), size.height.toFloat(), sceneFloor)
+                                    val fixedOrigin = studioSceneOrigin(size.width.toFloat(), size.height.toFloat(), base, Offset.Zero)
+                                    val factor = if (oldZoom > 0f) newZoom / oldZoom else 1f
+                                    val relative = centroid - fixedOrigin - pan
+                                    val scaledRelative = Offset(relative.x * factor, relative.y * factor)
+                                    val focalPan = centroid - fixedOrigin - scaledRelative + panChange
+                                    zoom = newZoom
+                                    pan = studioClampPan(focalPan, newZoom, sceneFloor)
+                                    event.changes.forEach { it.consume() }
+                                }
+                                event = awaitPointerEvent()
+                            }
+                        }
+                    }
+                    // Modo MOVER adiciona pan com um dedo; a pinça acima continua funcionando.
                     .then(
-                        if (cameraMode) Modifier.pointerInput(zoom, pan) {
+                        if (cameraMode) Modifier.pointerInput(sceneFloor.width, sceneFloor.height) {
                             awaitEachGesture {
                                 awaitFirstDown(requireUnconsumed = false)
                                 var event = awaitPointerEvent()
                                 while (event.changes.any { it.pressed }) {
-                                    val zoomChange = event.calculateZoom()
-                                    val panChange = event.calculatePan()
-                                    zoom = (zoom * zoomChange).coerceIn(.65f, 5.5f)
-                                    pan = studioClampPan(pan + panChange, zoom, sceneFloor)
-                                    event.changes.forEach { it.consume() }
+                                    val pressedCount = event.changes.count { it.pressed }
+                                    if (pressedCount == 1) {
+                                        val panChange = event.calculatePan()
+                                        pan = studioClampPan(pan + panChange, zoom, sceneFloor)
+                                        event.changes.forEach { it.consume() }
+                                    }
                                     event = awaitPointerEvent()
                                 }
                             }
@@ -321,7 +361,7 @@ fun FactoryStudio(
                         border = BorderStroke(1.dp, ElectricBlue.copy(alpha = .5f)),
                     ) {
                         Text(
-                            "MODO CÂMERA • arraste para mover • pinça para zoom • toque em CÂMERA para voltar a interagir",
+                            "MODO MOVER • 1 dedo move • 2 dedos aproximam/afastam • toque em INTERAGIR para selecionar",
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                             style = MaterialTheme.typography.labelSmall,
                             color = ElectricBlue,
@@ -343,7 +383,7 @@ fun FactoryStudio(
                 LegendDot(DangerRed, "Parada", Modifier.weight(1f))
             }
             Text(
-                if (cameraMode) "Modo câmera ativo • volte para INTERAGIR para selecionar" else "Modo INTERAGIR • toque direto na máquina ou operador • contorno azul confirma",
+                if (cameraMode) "MOVER ativo • 1 dedo move • pinça funciona sempre" else "INTERAGIR • toque em máquina/operador • use 2 dedos para zoom sem trocar de modo",
                 style = MaterialTheme.typography.labelSmall,
                 color = Steel400,
                 modifier = Modifier.padding(top = 4.dp),
@@ -532,9 +572,9 @@ private fun DrawScope.drawFactoryStudioScene(
 ) {
     val baseTileW = studioBaseTile(size.width, size.height, floor)
     val halfW = baseTileW * zoom
-    val stepX = halfW * .91f
-    val stepY = halfW * .60f
-    val origin = Offset(size.width * .075f + pan.x, size.height * .22f + pan.y)
+    val stepX = halfW * .88f
+    val stepY = halfW * .82f
+    val origin = studioSceneOrigin(size.width, size.height, baseTileW, pan)
 
     fun project(p: FloorPoint): Offset = Offset(
         origin.x + p.x * stepX,
@@ -546,23 +586,23 @@ private fun DrawScope.drawFactoryStudioScene(
     drawRect(
         Color(0xFF1D2A31),
         topLeft = Offset(size.width * .035f, size.height * .025f),
-        size = Size(size.width * .93f, size.height * .20f),
+        size = Size(size.width * .93f, size.height * .085f),
     )
     repeat(6) { i ->
         val x = size.width * (.08f + i * .17f)
         drawRect(
             Color(0xFF5E6B72).copy(alpha = .32f),
             topLeft = Offset(x, size.height * .035f),
-            size = Size(3f, size.height * .18f),
+            size = Size(3f, size.height * .070f),
         )
         drawCircle(
             Color(0xFFFFE0A0).copy(alpha = .18f),
             radius = halfW * .34f,
-            center = Offset(x + halfW * .15f, size.height * .16f),
+            center = Offset(x + halfW * .15f, size.height * .070f),
         )
     }
 
-    val craneY = size.height * .235f
+    val craneY = size.height * .105f
     drawLine(Color(0xFFD89A32), Offset(size.width * .08f, craneY), Offset(size.width * .92f, craneY), halfW * .10f)
     drawLine(Color(0xFF704E21), Offset(size.width * .08f, craneY + halfW * .17f), Offset(size.width * .92f, craneY + halfW * .17f), halfW * .05f)
     val trolleyPhase = ((store.state.company.lastSimulationAt / 80L) % 1000L) / 1000f
@@ -1134,16 +1174,27 @@ private fun DrawScope.drawWorkerActivityProp(
 }
 
 private fun studioBaseTile(width: Float, height: Float, floor: FactoryFloor): Float {
-    val horizontal = width / (floor.width * .91f + 7f)
-    val vertical = height / (floor.height * .60f + 10f)
-    return min(horizontal, vertical).coerceAtLeast(4f)
+    // V28.1: calcula a escala pelo retângulo REAL do piso.
+    // Antes havia reservas fixas enormes (+7 / +10) e stepY=.60, o que espremia
+    // um galpão 10x12 em uma pequena faixa da cena.
+    val usableWidth = width * .90f
+    val usableHeight = height * .82f
+    val horizontalUnits = floor.width.coerceAtLeast(1) * .88f + 1.65f
+    val verticalUnits = floor.height.coerceAtLeast(1) * .82f + 1.65f
+    return min(usableWidth / horizontalUnits, usableHeight / verticalUnits).coerceAtLeast(4f)
 }
 
+private fun studioSceneOrigin(width: Float, height: Float, baseTile: Float, pan: Offset): Offset = Offset(
+    width * .05f + baseTile * .78f + pan.x,
+    height * .105f + baseTile * .78f + pan.y,
+)
+
 private fun studioProject(p: FloorPoint, width: Float, height: Float, zoom: Float, pan: Offset, floor: FactoryFloor): Offset {
-    val halfW = studioBaseTile(width, height, floor) * zoom
-    val stepX = halfW * .91f
-    val stepY = halfW * .60f
-    val origin = Offset(width * .075f + pan.x, height * .22f + pan.y)
+    val baseTile = studioBaseTile(width, height, floor)
+    val halfW = baseTile * zoom
+    val stepX = halfW * .88f
+    val stepY = halfW * .82f
+    val origin = studioSceneOrigin(width, height, baseTile, pan)
     return Offset(origin.x + p.x * stepX, origin.y + p.y * stepY)
 }
 
@@ -1154,10 +1205,11 @@ private fun studioDistance(a: Offset, b: Offset): Float {
 }
 
 private fun studioClampPan(pan: Offset, zoom: Float, floor: FactoryFloor): Offset {
-    val expansionX = (floor.width - FactoryFloor.WIDTH).coerceAtLeast(0) * 18f
-    val expansionY = (floor.height - FactoryFloor.HEIGHT).coerceAtLeast(0) * 14f
-    val limitX = (620f + expansionX) * zoom
-    val limitY = (520f + expansionY) * zoom
+    val zoomOverflow = (zoom - 1f).coerceAtLeast(0f)
+    val expansionX = (floor.width - FactoryFloor.WIDTH).coerceAtLeast(0) * 26f
+    val expansionY = (floor.height - FactoryFloor.HEIGHT).coerceAtLeast(0) * 26f
+    val limitX = 90f + zoomOverflow * 760f + expansionX
+    val limitY = 90f + zoomOverflow * 900f + expansionY
     return Offset(pan.x.coerceIn(-limitX, limitX), pan.y.coerceIn(-limitY, limitY))
 }
 
