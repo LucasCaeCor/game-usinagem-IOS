@@ -90,7 +90,7 @@ fun AndroidV24MainMenu(
             Text(
                 "Gestão industrial, produção, equipe e evolução em uma fábrica que responde às suas decisões.",
                 style=MaterialTheme.typography.bodyMedium,
-                color=Steel300,
+                color=Steel400,
             )
             Spacer(Modifier.height(14.dp))
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(7.dp)) {

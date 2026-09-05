@@ -429,7 +429,7 @@ private fun StudioInteractionLayerV27_5(
     onStagingClick: () -> Unit,
     onShippingClick: () -> Unit,
 ) {
-    BoxWithConstraints(Modifier.matchParentSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
         val widthPx = with(density) { maxWidth.toPx() }
         val heightPx = with(density) { maxHeight.toPx() }
