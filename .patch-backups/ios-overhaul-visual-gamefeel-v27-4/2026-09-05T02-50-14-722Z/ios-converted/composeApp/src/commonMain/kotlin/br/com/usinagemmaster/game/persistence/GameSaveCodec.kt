@@ -50,7 +50,6 @@ object GameSaveCodec {
             save.lastMinigameAt,
             save.bestMinigameScore,
         )
-        row("PAYROLL4", save.lastPayrollCycle)
         row(
             "EXP4",
             save.expansion.specialty,
@@ -180,7 +179,6 @@ object GameSaveCodec {
         var lastDaily = -1L
         var lastMinigameAt = 0L
         var bestMinigameScore = 0.0
-        var lastPayrollCycle = -1L
         var expansion = ExpansionSave()
         var profile = PlayerProfileSave()
         var uiSettings = UiSettingsSave()
@@ -292,7 +290,6 @@ object GameSaveCodec {
                     lastMinigameAt = p.long(1)
                     bestMinigameScore = p.double(2).coerceIn(0.0, 1.0)
                 }
-                "PAYROLL4" -> lastPayrollCycle = p.long(1, -1L)
                 // V6 expansion row.
                 "EXP" -> expansion = ExpansionSave(
                     specialty = p.text(1, "generalista"),
@@ -511,7 +508,6 @@ object GameSaveCodec {
             lastDailyBonusDay = lastDaily,
             lastMinigameAt = lastMinigameAt,
             bestMinigameScore = bestMinigameScore,
-            lastPayrollCycle = lastPayrollCycle,
         )
     }.getOrNull()
 

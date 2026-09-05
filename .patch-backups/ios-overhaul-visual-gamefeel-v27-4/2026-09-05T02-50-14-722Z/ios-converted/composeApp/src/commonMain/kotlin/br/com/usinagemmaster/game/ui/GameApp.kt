@@ -24,7 +24,7 @@ import br.com.usinagemmaster.game.model.*
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 
-private const val GAME_APP_V27 = "game_app_visual_v27_4"
+private const val GAME_APP_V27 = "game_app_visual_v27_2"
 
 private enum class Screen(val title: String, val short: String, val glyph: String) {
     HOME("Painel executivo", "Início", "⌂"),
@@ -383,19 +383,6 @@ private fun EmployeesScreen(store: GameStore) {
             }
         }
         item {
-            IndustrialCard("FOLHA MENSAL", "Salários são debitados a cada ciclo de 30 dias") {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Total da equipe", color = Steel400)
-                    Text(GameStore.money(store.monthlyPayrollCents), color = DangerRed, fontWeight = FontWeight.Black)
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Próximo pagamento", color = Steel400)
-                    Text(formatV27Duration(store.monthlyPayrollRemainingMillis), color = SafetyAmber, fontWeight = FontWeight.Bold)
-                }
-                Text("O primeiro salário é pago na contratação; depois entra na folha mensal.", style = MaterialTheme.typography.labelSmall, color = Steel400)
-            }
-        }
-        item {
             IndustrialCard("ESCALAÇÃO INTELIGENTE","A melhor máquina recebe o operador com maior encaixe técnico") {
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Text("Modo foco",color=Steel100,fontWeight=FontWeight.Black);Text(if(store.focusModeRemainingMillis>0L)formatV27Duration(store.focusModeRemainingMillis) else "Disponível",color=if(store.focusModeRemainingMillis>0L)SafetyAmber else ProductionGreen,fontWeight=FontWeight.Black)}
                 Button(onClick=store::buySnack,enabled=store.focusModeRemainingMillis==0L,modifier=Modifier.fillMaxWidth()){Text(if(store.focusModeRemainingMillis>0L)"FOCO ATIVO • NÃO ACUMULA" else "ATIVAR MODO FOCO • 8H")}
@@ -412,7 +399,6 @@ private fun EmployeesScreen(store: GameStore) {
                         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Text(employee.name,fontWeight=FontWeight.Black,color=Steel100);if(employee.legendaryCode!=null)StatePill("LENDÁRIO",RoyalPurple)}
                         Text("${employee.specialty} • Nv.${employee.skillLevel} • ${employee.experience} min",style=MaterialTheme.typography.bodySmall,color=Steel400)
                         Text("Posto: ${machine?.let{MachineCatalog.byType(it.machineType)?.name} ?: "disponível"}",style=MaterialTheme.typography.bodySmall,color=if(machine==null)ProductionGreen else Steel200)
-                        Text("Salário mensal: ${GameStore.money(employee.salaryCents)}", style=MaterialTheme.typography.bodySmall, color=SafetyAmber)
                         LinearProgressIndicator(progress=(employee.fatigue/100.0).toFloat().coerceIn(0f,1f),modifier=Modifier.fillMaxWidth())
                         Text("Fadiga ${employee.fatigue.toInt()}% • moral ${employee.morale}",style=MaterialTheme.typography.labelSmall,color=Steel400)
                     }
@@ -869,16 +855,10 @@ private fun SettingsScreen(store: GameStore) {
                 SettingToggle("Resposta tátil", settings.hapticsEnabled) {
                     store.updateUiSettings(settings.copy(hapticsEnabled = it))
                 }
-                SettingToggle("Falas dos operadores", settings.legendarySpeechEnabled) {
+                SettingToggle("Falas de lendários", settings.legendarySpeechEnabled) {
                     store.updateUiSettings(settings.copy(legendarySpeechEnabled = it))
                 }
-                val speechPace = when {
-                    settings.legendarySpeechSeconds >= 11 -> "muito lento"
-                    settings.legendarySpeechSeconds >= 8 -> "lento"
-                    settings.legendarySpeechSeconds >= 5 -> "normal"
-                    else -> "rápido"
-                }
-                Text("Ritmo das falas: $speechPace • ${settings.legendarySpeechSeconds}s em tela")
+                Text("Duração da fala: ${settings.legendarySpeechSeconds}s")
                 Slider(
                     value = settings.legendarySpeechSeconds.toFloat(),
                     onValueChange = {

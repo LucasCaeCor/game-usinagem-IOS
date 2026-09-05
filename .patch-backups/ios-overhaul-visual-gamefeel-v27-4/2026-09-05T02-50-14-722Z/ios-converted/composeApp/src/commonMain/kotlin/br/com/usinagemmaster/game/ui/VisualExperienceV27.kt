@@ -28,7 +28,7 @@ import br.com.usinagemmaster.game.model.DailyMissionSave
 import br.com.usinagemmaster.game.model.EmployeeSave
 import br.com.usinagemmaster.game.model.MachineSave
 
-private const val VISUAL_V27 = "visual_experience_v27_4"
+private const val VISUAL_V27 = "visual_experience_v27_2"
 
 enum class DashboardVisualV27 { CASH, CARGO, PRODUCTION, TEAM, CONTRACT, RESEARCH, ROULETTE, FACTORY }
 
@@ -178,18 +178,6 @@ fun ShiftCommandDeckV27(store: GameStore, onPrecision: () -> Unit) {
                     enabled = ticket == 0L,
                     contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp),
                 ) { Text(if (ticket == 0L) "🎟 Ficha" else formatV27Duration(ticket), style = MaterialTheme.typography.labelSmall) }
-            }
-            Button(
-                onClick = {
-                    store.boost10Minutes()
-                    GameFeedback.play(GameSoundEffect.MACHINE_START, store.state.uiSettings.soundEnabled)
-                    GameFeedback.haptic(store.state.uiSettings.hapticsEnabled)
-                },
-                enabled = store.state.boostTokens > 0 && store.factoryFrame.open && store.production.operatingMachines > 0,
-                modifier = Modifier.fillMaxWidth().height(38.dp),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-            ) {
-                Text("⏩ ADIANTAR 10 MIN • ×${store.state.boostTokens}", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black)
             }
         }
     }

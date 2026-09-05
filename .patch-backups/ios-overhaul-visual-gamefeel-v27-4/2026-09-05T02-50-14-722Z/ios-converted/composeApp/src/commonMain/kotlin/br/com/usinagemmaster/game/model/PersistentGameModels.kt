@@ -239,5 +239,4 @@ data class GameSave(
     val lastDailyBonusDay: Long = -1L,
     val lastMinigameAt: Long = 0L,
     val bestMinigameScore: Double = 0.0,
-    val lastPayrollCycle: Long = -1L,
 )

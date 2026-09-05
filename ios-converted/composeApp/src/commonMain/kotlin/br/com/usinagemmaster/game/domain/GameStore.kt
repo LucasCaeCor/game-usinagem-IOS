@@ -30,6 +30,7 @@ private const val IDLE_CHECK_MAX_MILLIS = 5L * 60L * 1000L
 private const val REPRIMAND_GRACE_MILLIS = 60L * 60L * 1000L
 private const val IDLE_EVENT_CHANCE_PERCENT = 30
 private const val DAY_MILLIS = 86_400_000L
+private const val PAYROLL_MONTH_MILLIS = 30L * DAY_MILLIS
 
 private const val VISUAL_EXPERIENCE_V27 = "visual_experience_v27"
 
@@ -122,6 +123,18 @@ class GameStore {
         }
 
 
+    val monthlyPayrollCents: Long
+        get() = state.employees.sumOf { it.salaryCents }
+
+    val monthlyPayrollRemainingMillis: Long
+        get() {
+            val now = currentTimeMillis()
+            val cycle = now / PAYROLL_MONTH_MILLIS
+            val last = if (state.lastPayrollCycle < 0L) cycle else state.lastPayrollCycle
+            return (((last + 1L) * PAYROLL_MONTH_MILLIS) - now).coerceAtLeast(0L)
+        }
+
+
     val dailyMissionResetRemainingMillis: Long
         get() {
             val now = currentTimeMillis()
@@ -184,6 +197,7 @@ class GameStore {
     fun tick() {
         val now = currentTimeMillis()
         ensureDailyMissions(now)
+        processMonthlyPayroll(now)
         updateIdleDiscipline(now)
 
         val elapsed = (now - state.company.lastSimulationAt).coerceAtLeast(0L)
@@ -1732,6 +1746,36 @@ class GameStore {
         }
     }
 
+    private fun processMonthlyPayroll(now: Long) {
+        val cycle = now / PAYROLL_MONTH_MILLIS
+        if (state.lastPayrollCycle < 0L) {
+            state = state.copy(lastPayrollCycle = cycle)
+            persist()
+            return
+        }
+        if (cycle <= state.lastPayrollCycle) return
+
+        val payroll = monthlyPayrollCents
+        state = if (payroll <= 0L) {
+            state.copy(lastPayrollCycle = cycle)
+        } else {
+            state.copy(
+                company = state.company.copy(cashCents = state.company.cashCents - payroll),
+                lastPayrollCycle = cycle,
+                finances = addFinance(
+                    state.finances,
+                    "EXPENSE",
+                    "SALARY",
+                    payroll,
+                    "Folha salarial mensal • ${state.employees.size} funcionário(s)",
+                    now,
+                ),
+            )
+        }
+        if (payroll > 0L) notify("Folha mensal paga: ${money(payroll)} • ${state.employees.size} funcionário(s).")
+        persist()
+    }
+
     private fun updateIdleDiscipline(now: Long) {
         var workforce = state.workforce
 
@@ -2016,6 +2060,9 @@ class GameStore {
         if (save.workforce.nextIdleCheckAt <= 0L) {
             save = save.copy(workforce = save.workforce.copy(nextIdleCheckAt = randomIdleCheckAt(currentTimeMillis())))
         }
+        if (save.lastPayrollCycle < 0L) {
+            save = save.copy(lastPayrollCycle = currentTimeMillis() / PAYROLL_MONTH_MILLIS)
+        }
         val existingMissionIds = save.legendaryMissions.map { it.id }.toMutableSet()
         val seededMissions = save.legendaryMissions.toMutableList()
         save.employees.mapNotNull { it.legendaryCode }.distinct().forEach { code ->
@@ -2070,6 +2117,7 @@ class GameStore {
             machines = listOf(machine),
             goals = defaultGoals(),
             workforce = WorkforceSave(nextIdleCheckAt = now + IDLE_CHECK_MIN_MILLIS),
+            lastPayrollCycle = now / PAYROLL_MONTH_MILLIS,
         )
     }
 
