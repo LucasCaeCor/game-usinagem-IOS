@@ -29,7 +29,6 @@ private const val IDLE_CHECK_MIN_MILLIS = 2L * 60L * 1000L
 private const val IDLE_CHECK_MAX_MILLIS = 5L * 60L * 1000L
 private const val REPRIMAND_GRACE_MILLIS = 60L * 60L * 1000L
 private const val IDLE_EVENT_CHANCE_PERCENT = 30
-private const val DAY_MILLIS = 86_400_000L
 
 class GameStore {
     var state by mutableStateOf(loadOrCreate())
@@ -99,24 +98,6 @@ class GameStore {
 
     val minigameRemainingMillis: Long
         get() = (MINIGAME_COOLDOWN_MILLIS - (currentTimeMillis() - state.lastMinigameAt)).coerceAtLeast(0L)
-
-
-    val focusModeRemainingMillis: Long
-        get() = (state.snackUntil - currentTimeMillis()).coerceAtLeast(0L)
-
-    val dailyBonusRemainingMillis: Long
-        get() {
-            val now = currentTimeMillis()
-            val today = now / DAY_MILLIS
-            return if (state.lastDailyBonusDay < today) 0L else ((today + 1L) * DAY_MILLIS - now).coerceAtLeast(0L)
-        }
-
-    val dailyTicketRemainingMillis: Long
-        get() {
-            val now = currentTimeMillis()
-            val today = now / DAY_MILLIS
-            return if (state.expansion.lastDailyTicketDay < today) 0L else ((today + 1L) * DAY_MILLIS - now).coerceAtLeast(0L)
-        }
 
     fun clearMessage() {
         message = null
@@ -219,7 +200,6 @@ class GameStore {
     }
 
     fun buySnack() {
-        if (snackActive) return notify("Modo foco já está ativo por ${formatDurationCompact(focusModeRemainingMillis)}.")
         if (state.company.cashCents < TEAM_SNACK_COST_CENTS) {
             return notify("Caixa insuficiente para o cento de salgados.")
         }
@@ -233,7 +213,7 @@ class GameStore {
             ),
             finances = addFinance(
                 state.finances, "EXPENSE", "SALARY", TEAM_SNACK_COST_CENTS,
-                "Modo foco da equipe por 8h"
+                "Cento de salgados • foco da equipe por 8h"
             ),
         )
         notify("Equipe alimentada. Celular/ociosidade bloqueados por 8 horas.")
@@ -646,55 +626,6 @@ class GameStore {
         persistAndRefresh()
     }
 
-    fun operatorFitScore(employeeId: String, machineId: String): Int {
-        val employee = state.employees.firstOrNull { it.id == employeeId } ?: return 0
-        val machine = state.machines.firstOrNull { it.id == machineId } ?: return 0
-        return operatorFitScore(employee, machine)
-    }
-
-    fun assignBestOperator(machineId: String) {
-        val machine = state.machines.firstOrNull { it.id == machineId } ?: return notify("Máquina não encontrada.")
-        val best = state.employees.maxByOrNull { operatorFitScore(it, machine) }
-            ?: return notify("Nenhum operador disponível.")
-        state = state.copy(
-            employees = state.employees.map { current ->
-                when {
-                    current.id == best.id -> current.copy(assignedMachineId = machine.id)
-                    current.assignedMachineId == machine.id -> current.copy(assignedMachineId = null)
-                    else -> current
-                }
-            }
-        )
-        notify("${best.name} foi designado como operador ideal de ${machineName(machine.machineType)}.")
-        persistAndRefresh()
-    }
-
-    fun autoDistributeOperators() {
-        val machines = state.machines.filter { it.installed }.sortedWith(
-            compareByDescending<MachineSave> { MachineCatalog.byType(it.machineType)?.priceCents ?: 0L }
-                .thenByDescending { it.level }
-        )
-        if (machines.isEmpty()) return notify("Instale máquinas antes de distribuir a equipe.")
-        if (state.employees.isEmpty()) return notify("Contrate funcionários antes de distribuir a equipe.")
-
-        val remaining = state.employees.toMutableList()
-        val assignments = linkedMapOf<String, String>()
-        machines.forEach { machine ->
-            val best = remaining.maxByOrNull { operatorFitScore(it, machine) } ?: return@forEach
-            assignments[machine.id] = best.id
-            remaining.remove(best)
-        }
-
-        state = state.copy(
-            employees = state.employees.map { employee ->
-                val targetMachine = assignments.entries.firstOrNull { it.value == employee.id }?.key
-                employee.copy(assignedMachineId = targetMachine)
-            }
-        )
-        notify("Equipe redistribuída com base em especialidade, experiência, moral e fadiga.")
-        persistAndRefresh()
-    }
-
     fun unlockCompanySkill(id: String) {
         val def = GameProgression.companySkills.firstOrNull { it.id == id } ?: return
         if (id in state.expansion.companySkills) return
@@ -846,7 +777,54 @@ class GameStore {
     }
 
     fun hireLegendaryEmployee() {
-        notify("Equipe lendária não é contratada direto nesta versão. Colete lendários apenas pela Roleta Industrial e pelas missões correspondentes.")
+        val hired = state.employees.mapNotNull { it.legendaryCode }.toSet()
+        val available = LegendaryEmployeeCatalog.all.filter {
+            it.unlockLevel <= state.company.companyLevel && it.code !in hired
+        }
+        if (available.isEmpty()) {
+            val nextLevel = LegendaryEmployeeCatalog.all
+                .filter { it.code !in hired }
+                .minOfOrNull { it.unlockLevel }
+            return notify(
+                if (nextLevel != null && nextLevel > state.company.companyLevel)
+                    "Próximo funcionário lendário libera no nível $nextLevel da empresa."
+                else
+                    "Todos os funcionários lendários disponíveis já foram contratados."
+            )
+        }
+
+        val affordable = available.filter { it.salaryCents <= state.company.cashCents }
+        if (affordable.isEmpty()) return notify("Caixa insuficiente para os lendários liberados.")
+
+        val random = Random(currentTimeMillis() + idCounter++)
+        val def = affordable.random(random)
+        val employee = EmployeeSave(
+            id = newId("legendary"),
+            name = def.name,
+            specialty = def.specialty,
+            skillLevel = def.skillLevel,
+            salaryCents = def.salaryCents,
+            morale = def.morale,
+            trait = def.trait,
+            legendaryCode = def.code,
+        )
+        val mission = seedLegendaryMission(def.code)
+        state = state.copy(
+            company = state.company.copy(cashCents = state.company.cashCents - def.salaryCents),
+            employees = state.employees + employee,
+            legendaryMissions = if (mission != null && state.legendaryMissions.none { it.id == mission.id }) {
+                state.legendaryMissions + mission
+            } else state.legendaryMissions,
+            finances = addFinance(
+                state.finances,
+                "EXPENSE",
+                "SALARY",
+                def.salaryCents,
+                "Contratação lendária: ${def.name}",
+            ),
+        )
+        notify("${def.name} entrou para sua equipe lendária.")
+        persistAndRefresh()
     }
 
     fun claimLegendaryMission(id: String) {
@@ -1975,35 +1953,6 @@ class GameStore {
         return null
     }
 
-    private fun operatorFitScore(employee: EmployeeSave, machine: MachineSave): Int {
-        val specialty = MachineCatalog.byType(machine.machineType)?.specialty?.name
-        val specialtyBonus = if (employee.specialty == specialty) 55 else 0
-        val legendaryBonus = if (employee.legendaryCode != null) 18 else 0
-        val moraleBonus = (employee.morale.coerceIn(0, 100) / 5)
-        val fatiguePenalty = (employee.fatigue.coerceIn(0.0, 1.0) * 22.0).toInt()
-        val currentMachineBonus = if (employee.assignedMachineId == machine.id) 6 else 0
-        val traitBonus = when {
-            employee.trait.contains("CNC", ignoreCase = true) && machine.machineType.contains("CNC") -> 12
-            employee.trait.contains("Perfeccion", ignoreCase = true) -> 8
-            employee.trait.contains("Aprende", ignoreCase = true) -> 5
-            else -> 0
-        }
-        return specialtyBonus + legendaryBonus + moraleBonus + currentMachineBonus + traitBonus + employee.skillLevel * 9 - fatiguePenalty
-    }
-
-    private fun pad2(value: Long): String = value.toString().padStart(2, '0')
-
-    private fun formatDurationCompact(value: Long): String {
-        val total = (value / 1000L).coerceAtLeast(0L)
-        val h = total / 3600L
-        val m = (total % 3600L) / 60L
-        val s = total % 60L
-        return when {
-            h > 0L -> "${pad2(h)}:${pad2(m)}:${pad2(s)}"
-            else -> "${pad2(m)}:${pad2(s)}"
-        }
-    }
-
     private fun persistAndRefresh() {
         persist()
         refreshFactoryInput()
@@ -2046,10 +1995,7 @@ class GameStore {
         fun money(cents: Long): String {
             val sign = if (cents < 0L) "-" else ""
             val safe = if (cents == Long.MIN_VALUE) Long.MAX_VALUE else kotlin.math.abs(cents)
-            val whole = safe / 100L
-            val centsPart = (safe % 100L).toString().padStart(2, '0')
-            val grouped = whole.toString().reversed().chunked(3).joinToString(".").reversed()
-            return "${sign}R$ ${grouped},${centsPart}"
+            return "${sign}R$ ${safe / 100L},${(safe % 100L).toString().padStart(2, '0')}"
         }
 
         fun percent(value: Double): String = "${(value.coerceIn(0.0, 1.0) * 100.0).roundToInt()}%"
