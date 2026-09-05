@@ -16,12 +16,12 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -34,15 +34,12 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import br.com.usinagemmaster.core.util.Formatters
 import br.com.usinagemmaster.domain.catalog.MachineCatalog
@@ -65,7 +62,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-private const val FACTORY_STUDIO_V27 = "factory_studio_v27_5"
+private const val FACTORY_STUDIO_V27 = "factory_studio_v27_4"
 
 @Composable
 fun FactoryStudio(
@@ -74,7 +71,6 @@ fun FactoryStudio(
 ) {
     var zoom by remember { mutableStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
-    var cameraMode by remember { mutableStateOf(false) }
     var selectedMachineId by remember { mutableStateOf<String?>(null) }
     var selectedWorkerId by remember { mutableStateOf<String?>(null) }
     var machineDialogId by remember { mutableStateOf<String?>(null) }
@@ -206,7 +202,6 @@ fun FactoryStudio(
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    SmallZoomButton(if (cameraMode) "CÂMERA ✓" else "CÂMERA") { cameraMode = !cameraMode }
                     SmallZoomButton("−") { zoom = (zoom - .18f).coerceIn(.78f, 3.25f) }
                     SmallZoomButton("${(zoom * 100).toInt()}%") { zoom = 1f; pan = Offset.Zero }
                     SmallZoomButton("+") { zoom = (zoom + .18f).coerceIn(.78f, 3.25f) }
@@ -220,25 +215,111 @@ fun FactoryStudio(
                     .fillMaxWidth()
                     .height(610.dp)
                     .background(Steel950, RoundedCornerShape(18.dp))
-                    .border(1.dp, Steel700, RoundedCornerShape(18.dp))
-                    .then(
-                        if (cameraMode) Modifier.pointerInput(zoom, pan) {
+                    .border(1.dp, Steel700, RoundedCornerShape(18.dp)),
+            ) {
+                Canvas(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .pointerInput(
+                            store.state.machines,
+                            store.factoryFrame.workers,
+                            batch?.stage,
+                            zoom,
+                            pan,
+                        ) {
+                            detectTapGestures(
+                                onTap = { tap ->
+                                    val width = size.width.toFloat()
+                                    val height = size.height.toFloat()
+                                    val base = studioBaseTile(width, height) * zoom
+                                    fun point(p: FloorPoint) = studioProject(p, width, height, zoom, pan)
+                                    fun distance(a: Offset, b: Offset) = studioDistance(a, b)
+                                    val stage = studioStage(batch)
+                                    val stationRadius = (base * 1.35f).coerceAtLeast(38f)
+
+                                    val q = point(FactoryFloor.INSPECTION.point())
+                                    if (distance(tap, q) <= stationRadius && batch != null) {
+                                        when (stage) {
+                                            ProductionStage.MACHINED -> { store.moveOwnerBatchToQuality(); GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled); GameFeedback.haptic(hapticsEnabled) }
+                                            ProductionStage.WAITING_QC, ProductionStage.QC -> { showQuality = true; GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled) }
+                                            else -> Unit
+                                        }
+                                        return@detectTapGestures
+                                    }
+
+                                    val prep = point(FactoryFloor.STAGING.point())
+                                    if (distance(tap, prep) <= stationRadius) {
+                                        if (stage == ProductionStage.APPROVED) { store.packOwnerBatch(); GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled) }
+                                        else if (store.pendingCargo.isNotEmpty() && !frame.owner.busy) { store.startCargoDelivery(); GameFeedback.play(GameSoundEffect.MACHINE_START, soundEnabled) }
+                                        return@detectTapGestures
+                                    }
+
+                                    val shipping = point(FactoryFloor.SHIPPING.point())
+                                    if (distance(tap, shipping) <= stationRadius && batch != null) {
+                                        if (stage == ProductionStage.READY_TO_SHIP) { store.shipOwnerBatch(); GameFeedback.play(GameSoundEffect.REWARD, soundEnabled); GameFeedback.haptic(hapticsEnabled) }
+                                        return@detectTapGestures
+                                    }
+
+                                    val touchedWorker = store.factoryFrame.workers
+                                        .asSequence()
+                                        .filter { it.activity != WorkerActivity.OFF_SHIFT }
+                                        .map { worker ->
+                                            val visualCenter = point(worker.position) + Offset(0f, -base * 1.90f)
+                                            worker to distance(tap, visualCenter)
+                                        }
+                                        .minByOrNull { it.second }
+                                        ?.takeIf { it.second <= (base * 1.15f).coerceAtLeast(44f) }
+                                        ?.first
+                                    if (touchedWorker != null) {
+                                        selectedWorkerId = touchedWorker.id
+                                        selectedMachineId = null
+                                        workerDialogId = touchedWorker.id
+                                        GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled)
+                                        GameFeedback.haptic(hapticsEnabled)
+                                        if (touchedWorker.activity == WorkerActivity.PHONE && reprimandTargetId == null && !frame.owner.busy) reprimandTargetId = touchedWorker.id
+                                        return@detectTapGestures
+                                    }
+
+                                    val touchedMachine = store.state.machines
+                                        .filter { it.installed }
+                                        .map { machine ->
+                                            val input = FactoryMachineInput(machine.id, machine.gridX, machine.gridY, machine.installed, machine.condition)
+                                            val visualCenter = point(FactoryFloor.bay(input).point()) + Offset(0f, -base * .43f)
+                                            machine to distance(tap, visualCenter)
+                                        }
+                                        .minByOrNull { it.second }
+                                        ?.takeIf { it.second <= (base * 1.55f).coerceAtLeast(50f) }
+                                        ?.first
+                                    if (touchedMachine != null) {
+                                        selectedMachineId = touchedMachine.id
+                                        selectedWorkerId = null
+                                        machineDialogId = touchedMachine.id
+                                        GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled)
+                                        GameFeedback.haptic(hapticsEnabled)
+                                    } else {
+                                        selectedMachineId = null
+                                        selectedWorkerId = null
+                                    }
+                                },
+                            )
+                        }
+                        .pointerInput(zoom, pan) {
                             awaitEachGesture {
                                 awaitFirstDown(requireUnconsumed = false)
                                 var event = awaitPointerEvent()
                                 while (event.changes.any { it.pressed }) {
-                                    val zoomChange = event.calculateZoom()
-                                    val panChange = event.calculatePan()
-                                    zoom = (zoom * zoomChange).coerceIn(.78f, 3.25f)
-                                    pan = studioClampPan(pan + panChange, zoom)
-                                    event.changes.forEach { it.consume() }
+                                    if (event.changes.count { it.pressed } >= 2) {
+                                        val zoomChange = event.calculateZoom()
+                                        val panChange = event.calculatePan()
+                                        zoom = (zoom * zoomChange).coerceIn(.78f, 3.25f)
+                                        pan = studioClampPan(pan + panChange, zoom)
+                                        event.changes.forEach { it.consume() }
+                                    }
                                     event = awaitPointerEvent()
                                 }
                             }
-                        } else Modifier
-                    ),
-            ) {
-                Canvas(modifier = Modifier.matchParentSize()) {
+                        },
+                ) {
                     drawFactoryStudioScene(
                         store = store,
                         frame = frame,
@@ -255,68 +336,6 @@ fun FactoryStudio(
                     )
                 }
 
-                if (!cameraMode) {
-                    StudioInteractionLayerV27_5(
-                        store = store,
-                        frame = frame,
-                        batch = batch,
-                        zoom = zoom,
-                        pan = pan,
-                        onMachineClick = { id ->
-                            selectedMachineId = id
-                            selectedWorkerId = null
-                            machineDialogId = id
-                            GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled)
-                            GameFeedback.haptic(hapticsEnabled)
-                        },
-                        onWorkerClick = { id ->
-                            selectedWorkerId = id
-                            selectedMachineId = null
-                            workerDialogId = id
-                            GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled)
-                            GameFeedback.haptic(hapticsEnabled)
-                            val worker = frame.workers.firstOrNull { it.id == id }
-                            if (worker?.activity == WorkerActivity.PHONE && reprimandTargetId == null && !frame.owner.busy) {
-                                reprimandTargetId = id
-                            }
-                        },
-                        onQualityClick = {
-                            when (studioStage(batch)) {
-                                ProductionStage.MACHINED -> { store.moveOwnerBatchToQuality(); GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled) }
-                                ProductionStage.WAITING_QC, ProductionStage.QC -> { showQuality = true; GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled) }
-                                else -> Unit
-                            }
-                        },
-                        onStagingClick = {
-                            when {
-                                studioStage(batch) == ProductionStage.APPROVED -> { store.packOwnerBatch(); GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled) }
-                                store.pendingCargo.isNotEmpty() && !frame.owner.busy -> { store.startCargoDelivery(); GameFeedback.play(GameSoundEffect.MACHINE_START, soundEnabled) }
-                            }
-                        },
-                        onShippingClick = {
-                            if (studioStage(batch) == ProductionStage.READY_TO_SHIP) {
-                                store.shipOwnerBatch()
-                                GameFeedback.play(GameSoundEffect.REWARD, soundEnabled)
-                                GameFeedback.haptic(hapticsEnabled)
-                            }
-                        },
-                    )
-                } else {
-                    Surface(
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp),
-                        shape = RoundedCornerShape(999.dp),
-                        color = Steel950.copy(alpha = .90f),
-                        border = BorderStroke(1.dp, ElectricBlue.copy(alpha = .5f)),
-                    ) {
-                        Text(
-                            "MODO CÂMERA • arraste para mover • pinça para zoom • toque em CÂMERA para voltar a interagir",
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ElectricBlue,
-                        )
-                    }
-                }
-
                 StudioSceneHud(
                     modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
                     frame = frame,
@@ -330,12 +349,6 @@ fun FactoryStudio(
                 LegendDot(SafetyAmber, "Setup/logística", Modifier.weight(1f))
                 LegendDot(DangerRed, "Parada", Modifier.weight(1f))
             }
-            Text(
-                if (cameraMode) "Modo câmera ativo • volte para INTERAGIR para selecionar" else "Modo INTERAGIR • toque direto na máquina ou operador • contorno azul confirma",
-                style = MaterialTheme.typography.labelSmall,
-                color = Steel400,
-                modifier = Modifier.padding(top = 4.dp),
-            )
 
             StudioOwnerActionStrip(store, batch)
             selectedWorkerId?.let { id -> StudioSelectedWorkerCard(store, id) }
@@ -414,75 +427,6 @@ fun FactoryStudio(
             },
         )
     }
-}
-
-@Composable
-private fun StudioInteractionLayerV27_5(
-    store: GameStore,
-    frame: FactoryFrame,
-    batch: OwnerWorkBatchSave?,
-    zoom: Float,
-    pan: Offset,
-    onMachineClick: (String) -> Unit,
-    onWorkerClick: (String) -> Unit,
-    onQualityClick: () -> Unit,
-    onStagingClick: () -> Unit,
-    onShippingClick: () -> Unit,
-) {
-    BoxWithConstraints(Modifier.matchParentSize()) {
-        val density = LocalDensity.current
-        val widthPx = with(density) { maxWidth.toPx() }
-        val heightPx = with(density) { maxHeight.toPx() }
-        val base = studioBaseTile(widthPx, heightPx) * zoom
-        fun projected(point: FloorPoint): Offset = studioProject(point, widthPx, heightPx, zoom, pan)
-
-        // Estações de fluxo: hit targets Compose independentes do Canvas.
-        StudioTapTargetV27_5(projected(FactoryFloor.INSPECTION.point()), 64.dp, 64.dp, "Qualidade", onQualityClick)
-        StudioTapTargetV27_5(projected(FactoryFloor.STAGING.point()), 64.dp, 64.dp, "Preparação", onStagingClick)
-        StudioTapTargetV27_5(projected(FactoryFloor.SHIPPING.point()), 64.dp, 64.dp, "Expedição", onShippingClick)
-
-        // Máquinas: retângulo acompanha o volume visual da silhueta, não apenas um ponto central.
-        store.state.machines.filter { it.installed }.forEach { machine ->
-            val input = FactoryMachineInput(machine.id, machine.gridX, machine.gridY, machine.installed, machine.condition)
-            val center = projected(FactoryFloor.bay(input).point()) + Offset(0f, -base * .42f)
-            StudioTapTargetV27_5(center, 72.dp, 58.dp, MachineCatalog.byType(machine.machineType)?.name ?: machine.machineType) {
-                onMachineClick(machine.id)
-            }
-        }
-
-        // Operadores ficam por último e, portanto, acima das máquinas quando há sobreposição.
-        frame.workers.filter { it.activity != WorkerActivity.OFF_SHIFT }.forEach { worker ->
-            val ground = projected(worker.position)
-            val center = ground + Offset(0f, -base * 1.72f)
-            StudioTapTargetV27_5(center, 54.dp, 86.dp, store.state.employees.firstOrNull { it.id == worker.id }?.name ?: "Operador") {
-                onWorkerClick(worker.id)
-            }
-        }
-    }
-}
-
-@Composable
-private fun StudioTapTargetV27_5(
-    centerPx: Offset,
-    width: Dp,
-    height: Dp,
-    description: String,
-    onClick: () -> Unit,
-) {
-    val density = LocalDensity.current
-    val widthPx = with(density) { width.toPx() }
-    val heightPx = with(density) { height.toPx() }
-    Box(
-        modifier = Modifier
-            .offset {
-                IntOffset(
-                    (centerPx.x - widthPx / 2f).roundToInt(),
-                    (centerPx.y - heightPx / 2f).roundToInt(),
-                )
-            }
-            .size(width, height)
-            .clickable(onClickLabel = description, onClick = onClick),
-    )
 }
 
 @Composable

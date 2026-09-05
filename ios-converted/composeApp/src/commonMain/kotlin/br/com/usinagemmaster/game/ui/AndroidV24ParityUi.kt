@@ -37,89 +37,100 @@ fun AndroidV24MainMenu(
     onCommunity: () -> Unit,
     onSettings: () -> Unit,
 ) {
-    val transition = rememberInfiniteTransition(label = "landing_v27")
-    val phase by transition.animateFloat(0f, 1f, infiniteRepeatable(tween(8_000, easing = LinearEasing), RepeatMode.Restart), label = "landing_phase")
-    val pulse by transition.animateFloat(.35f, 1f, infiniteRepeatable(tween(1_700), RepeatMode.Reverse), label = "landing_pulse")
+    val transition = rememberInfiniteTransition(label = "landing_v27_5")
+    val pulse by transition.animateFloat(.30f, 1f, infiniteRepeatable(tween(2_400), RepeatMode.Reverse), label = "landing_pulse")
     val production = store.production
     val live = store.factoryFrame.open
 
     Box(
-        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Steel980, Steel950, Color(0xFF101B1D)))).statusBarsPadding().navigationBarsPadding()
+        Modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(Steel980, Steel950, Color(0xFF10191C))))
+            .statusBarsPadding()
+            .navigationBarsPadding()
     ) {
+        // Landing limpa: só arquitetura industrial abstrata. Sem máquinas/personagens competindo com o CTA.
         Canvas(Modifier.fillMaxSize()) {
-            val spacing = 38f
-            var x = -spacing + (phase * spacing)
-            while (x < size.width + spacing) { drawLine(Steel700.copy(alpha=.09f), Offset(x,0f), Offset(x,size.height),1f); x += spacing }
-            var y = 0f
-            while (y < size.height) { drawLine(Steel700.copy(alpha=.07f), Offset(0f,y), Offset(size.width,y),1f); y += spacing }
-            drawCircle(IndustrialAmber.copy(alpha=.035f + pulse*.05f), size.width*.52f, Offset(size.width*.72f,size.height*.27f))
-            drawCircle(ElectricBlue.copy(alpha=.025f + pulse*.035f), size.width*.38f, Offset(size.width*.12f,size.height*.73f))
-            drawRect(Color.Black.copy(alpha=.34f), Offset(0f,size.height*.67f), Size(size.width,size.height*.33f))
-            drawLine(IndustrialAmber.copy(alpha=.55f), Offset(0f,size.height*.80f), Offset(size.width,size.height*.80f),3f)
-        }
-
-        Row(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom=20.dp, start=6.dp, end=6.dp).graphicsLayer(alpha=.48f),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            val machines = store.state.machines.take(3)
-            if (machines.isEmpty()) {
-                MachineArtworkV27("Torno Mecânico", machineType="MECHANICAL_LATHE", modifier=Modifier.width(112.dp).height(80.dp))
-                MachineArtworkV27("Centro CNC", machineType="CNC_MACHINING_CENTER", modifier=Modifier.width(112.dp).height(80.dp))
-            } else machines.forEach { machine ->
-                val name=MachineCatalog.byType(machine.machineType)?.name ?: machine.machineType
-                MachineArtworkV27(name,machineType=machine.machineType,modifier=Modifier.width(108.dp).height(78.dp))
+            val horizon = size.height * .70f
+            drawRect(Color.Black.copy(alpha = .18f), Offset(0f, horizon), Size(size.width, size.height - horizon))
+            drawLine(IndustrialAmber.copy(alpha = .48f), Offset(size.width*.08f,horizon), Offset(size.width*.92f,horizon),2.5f)
+            repeat(5) { i ->
+                val x = size.width * (.10f + i*.20f)
+                drawLine(Steel700.copy(alpha=.12f), Offset(x,size.height*.08f), Offset(x,horizon),1.2f)
             }
-        }
-
-        // Operadores ao fundo: a landing já mostra que a fábrica está viva.
-        Canvas(Modifier.align(Alignment.BottomEnd).padding(bottom=64.dp,end=20.dp).size(118.dp,170.dp).graphicsLayer(alpha=.72f)) {
-            drawPlayerAvatarFigure(Offset(size.width*.32f,size.height*.93f),store.state.profile,size.minDimension/88f,phase,true,false)
-            val employee=store.state.employees.firstOrNull()
-            if(employee!=null) drawPlayerAvatarFigure(Offset(size.width*.72f,size.height*.93f), employeeAvatarForLandingV27(employee), size.minDimension/96f, (phase+.32f)%1f, true, false)
+            repeat(6) { i ->
+                val y = size.height * (.14f + i*.085f)
+                drawLine(Steel700.copy(alpha=.08f), Offset(size.width*.06f,y), Offset(size.width*.94f,y),1f)
+            }
+            drawCircle(IndustrialAmber.copy(alpha=.025f + pulse*.035f), size.width*.34f, Offset(size.width*.82f,size.height*.20f))
+            drawCircle(ElectricBlue.copy(alpha=.018f + pulse*.026f), size.width*.28f, Offset(size.width*.12f,size.height*.76f))
         }
 
         Column(
-            Modifier.fillMaxSize().padding(horizontal=20.dp,vertical=16.dp),
-            verticalArrangement=Arrangement.Center,
+            Modifier.fillMaxSize().padding(horizontal=22.dp, vertical=18.dp),
+            verticalArrangement = Arrangement.Center,
         ) {
-            Surface(shape=RoundedCornerShape(999.dp),color=(if(live)ProductionGreen else SafetyAmber).copy(alpha=.12f),border=BorderStroke(1.dp,(if(live)ProductionGreen else SafetyAmber).copy(alpha=.42f))) {
-                Text(if(live)"● FÁBRICA ONLINE" else "● FORA DO TURNO",Modifier.padding(horizontal=11.dp,vertical=5.dp),style=MaterialTheme.typography.labelMedium,fontWeight=FontWeight.Black,color=if(live)ProductionGreen else SafetyAmber)
+            Surface(
+                shape=RoundedCornerShape(999.dp),
+                color=(if(live)ProductionGreen else SafetyAmber).copy(alpha=.10f),
+                border=BorderStroke(1.dp,(if(live)ProductionGreen else SafetyAmber).copy(alpha=.38f)),
+            ) {
+                Text(
+                    if(live)"● FÁBRICA ONLINE" else "● FORA DO TURNO",
+                    Modifier.padding(horizontal=10.dp,vertical=4.dp),
+                    style=MaterialTheme.typography.labelSmall,
+                    fontWeight=FontWeight.Black,
+                    color=if(live)ProductionGreen else SafetyAmber,
+                )
             }
             Spacer(Modifier.height(14.dp))
             Text("USINAGEM\nMASTER",style=MaterialTheme.typography.displaySmall,fontWeight=FontWeight.Black,color=Steel100)
             Text("IMPÉRIO DO AÇO",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Black,color=IndustrialAmber)
             Spacer(Modifier.height(8.dp))
-            Text("Sua fábrica respira: operadores trabalham, máquinas produzem e cada decisão aparece no chão de fábrica.",style=MaterialTheme.typography.bodyLarge,color=Steel200)
-            Spacer(Modifier.height(16.dp))
+            Text(
+                "Gestão industrial, produção, equipe e evolução em uma fábrica que responde às suas decisões.",
+                style=MaterialTheme.typography.bodyMedium,
+                color=Steel300,
+            )
+            Spacer(Modifier.height(14.dp))
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
                 LandingStatV27("CAIXA",GameStore.money(store.state.company.cashCents),Modifier.weight(1f))
-                LandingStatV27("PRODUÇÃO","${oneV24(production.totalUnitsPer10Minutes)} pç",Modifier.weight(1f))
+                LandingStatV27("PRODUÇÃO","${oneV24(production.totalUnitsPer10Minutes)} pç / 10 min",Modifier.weight(1f))
             }
-            Spacer(Modifier.height(14.dp))
-            Button(onClick={GameFeedback.play(GameSoundEffect.MACHINE_START,store.state.uiSettings.soundEnabled);GameFeedback.haptic(store.state.uiSettings.hapticsEnabled);onEnter()},modifier=Modifier.fillMaxWidth().height(58.dp)) { Text("ENTRAR NA FÁBRICA  →",fontWeight=FontWeight.Black) }
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick={
+                    GameFeedback.play(GameSoundEffect.MACHINE_START,store.state.uiSettings.soundEnabled)
+                    GameFeedback.haptic(store.state.uiSettings.hapticsEnabled)
+                    onEnter()
+                },
+                modifier=Modifier.fillMaxWidth().height(50.dp),
+                contentPadding=PaddingValues(horizontal=16.dp, vertical=8.dp),
+            ) {
+                Text("ENTRAR NA FÁBRICA",style=MaterialTheme.typography.labelLarge,fontWeight=FontWeight.Black)
+            }
             Spacer(Modifier.height(7.dp))
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
-                OutlinedButton(onClick=onProfile,modifier=Modifier.weight(1f)){Text("Personagem")}
-                OutlinedButton(onClick=onCommunity,modifier=Modifier.weight(1f)){Text("Comunidade")}
-                OutlinedButton(onClick=onSettings,modifier=Modifier.weight(1f)){Text("Ajustes")}
+                OutlinedButton(onClick=onProfile,modifier=Modifier.weight(1f).height(42.dp),contentPadding=PaddingValues(horizontal=6.dp,vertical=4.dp)){Text("Personagem",style=MaterialTheme.typography.labelSmall)}
+                OutlinedButton(onClick=onCommunity,modifier=Modifier.weight(1f).height(42.dp),contentPadding=PaddingValues(horizontal=6.dp,vertical=4.dp)){Text("Comunidade",style=MaterialTheme.typography.labelSmall)}
+                OutlinedButton(onClick=onSettings,modifier=Modifier.weight(1f).height(42.dp),contentPadding=PaddingValues(horizontal=6.dp,vertical=4.dp)){Text("Ajustes",style=MaterialTheme.typography.labelSmall)}
             }
-            Spacer(Modifier.height(8.dp))
-            Text("${store.state.company.name} • N${store.state.company.companyLevel} • ${store.state.machines.size} máquinas",style=MaterialTheme.typography.labelSmall,color=Steel400)
+            Spacer(Modifier.height(9.dp))
+            Text(
+                "${store.state.company.name} • N${store.state.company.companyLevel} • ${store.state.machines.size} máquinas",
+                style=MaterialTheme.typography.labelSmall,
+                color=Steel400,
+            )
         }
     }
 }
+
+private const val LANDING_V27_5 = "landing_clean_v27_5"
 
 @Composable
 private fun LandingStatV27(label:String,value:String,modifier:Modifier=Modifier){
     Surface(modifier,shape=RoundedCornerShape(14.dp),color=Steel900.copy(alpha=.90f),border=BorderStroke(1.dp,Steel700.copy(alpha=.75f))){Column(Modifier.padding(10.dp)){Text(label,style=MaterialTheme.typography.labelSmall,color=Steel400);Text(value,fontWeight=FontWeight.Black,color=Steel100,maxLines=1)}}
 }
-
-private fun employeeAvatarForLandingV27(employee:EmployeeSave):PlayerProfileSave = PlayerProfileSave(
-    name=employee.name,gender=if(employee.name.substringBefore(' ') in setOf("Luciana","Camila","Fernanda","Amanda","Juliana","Mariana","Beatriz","Renata"))"FEMALE" else "MALE",
-    skinStyle=when(employee.legendaryCode){"tatu_banhado"->"TATUZAO";"kendao"->"KENDAO_KIMONO";"magrao"->"MAGRAO";else->"WORKSHOP"},bodyType="STANDARD",skinTone="MEDIUM",hairStyle="SHORT",hairColor="DARK",uniformColor="NAVY",helmetColor="YELLOW",accessory="NONE",onboardingComplete=true,
-)
 
 @Composable
 fun AndroidWorkLifeHomeCard(store: GameStore) {
