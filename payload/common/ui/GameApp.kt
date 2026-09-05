@@ -24,7 +24,7 @@ import br.com.usinagemmaster.game.model.*
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 
-private const val GAME_APP_V27 = "game_app_visual_v27_4"
+private const val GAME_APP_V27 = "game_app_visual_v28"
 
 private enum class Screen(val title: String, val short: String, val glyph: String) {
     HOME("Painel executivo", "Início", "⌂"),
@@ -35,6 +35,7 @@ private enum class Screen(val title: String, val short: String, val glyph: Strin
     STORE("Loja industrial", "Loja", "▣"),
     FINANCE("Finanças", "Finanças", "R$"),
     PROGRESSION("Empresa e pesquisa", "Evolução", "↗"),
+    MISSIONS("Central de missões", "Missões", "✓"),
     PROFILE("Meu personagem", "Perfil", "●"),
     ROULETTE("Roleta Industrial", "Roleta", "◈"),
     MINIGAME("Desafio de precisão", "Precisão", "◎"),
@@ -145,6 +146,7 @@ fun GameApp(store: GameStore) {
                     Screen.STORE -> StoreScreen(store)
                     Screen.FINANCE -> FinanceScreen(store)
                     Screen.PROGRESSION -> ProgressionScreen(store)
+                    Screen.MISSIONS -> MissionsScreenV28(store)
                     Screen.PROFILE -> ProfileScreen(store, onOpen = { screen = it })
                     Screen.ROULETTE -> IndustrialRouletteScreen(store)
                     Screen.MINIGAME -> PrecisionMinigameScreen(store)
@@ -247,7 +249,6 @@ private fun HomeScreen(
         }
 
         item { ShiftCommandDeckV27(store) { onOpen(Screen.MINIGAME) } }
-        item { DailyMissionsV27_2(store) }
         item { AndroidDashboardProgress(store) }
 
         item { SectionTitle("Central de gestão", "Abra só o setor que precisa da sua atenção") }
@@ -263,7 +264,11 @@ private fun HomeScreen(
                 }
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
                     DashboardArtCardV27(DashboardVisualV27.ROULETTE,"Roleta",store.state.expansion.gachaTickets.toString(),"fichas disponíveis",Modifier.weight(1f)){onOpen(Screen.ROULETTE)}
+                    DashboardArtCardV27(DashboardVisualV27.CONTRACT,"Missões",store.dailyMissions.count{it.claimed}.toString()+"/3","diárias e lendárias",Modifier.weight(1f)){onOpen(Screen.MISSIONS)}
+                }
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
                     DashboardArtCardV27(DashboardVisualV27.FACTORY,"Loja",GameStore.money(store.state.company.cashCents),"modernizar parque",Modifier.weight(1f)){onOpen(Screen.STORE)}
+                    DashboardArtCardV27(DashboardVisualV27.CARGO,"Expedição",if(store.autoCargoDeliveryEnabled)"AUTO" else "MANUAL","controle de entrega",Modifier.weight(1f)){onOpen(Screen.FACTORY)}
                 }
             }
         }
@@ -306,13 +311,14 @@ private fun FactoryScreen(
             "LIVE" -> {
                 item { ShiftCommandDeckV27(store){onOpen(Screen.MINIGAME)} }
                 item { FactoryStudio(store,modifier=Modifier.padding(horizontal=2.dp)) }
+                item { Box(Modifier.padding(horizontal=12.dp)) { FactoryAutomationV28(store) } }
                 item {
                     IndustrialCard("EXPEDIÇÃO DO DONO","A carga só entra no caixa após a viagem") {
                         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically){
                             Column{Text("${one(store.pendingCargoUnits)} peças",fontWeight=FontWeight.Black,color=Steel100);Text(GameStore.money(store.pendingCargoCents),color=ProductionGreen,fontWeight=FontWeight.Black)}
                             StatePill(owner.activity.label,if(owner.busy)SafetyAmber else ProductionGreen)
                         }
-                        Button(onClick={store.startCargoDelivery();GameFeedback.play(GameSoundEffect.MACHINE_START,store.state.uiSettings.soundEnabled)},enabled=store.pendingCargo.isNotEmpty()&&!owner.busy,modifier=Modifier.fillMaxWidth()){Text(if(owner.busy)"ENTREGA EM ANDAMENTO" else "LEVAR CARGA PARA ENTREGA")}
+                        Button(onClick={store.startCargoDelivery();GameFeedback.play(GameSoundEffect.MACHINE_START,store.state.uiSettings.soundEnabled)},enabled=store.pendingCargo.isNotEmpty()&&!owner.busy&&!store.autoCargoDeliveryEnabled,modifier=Modifier.fillMaxWidth()){Text(when{store.autoCargoDeliveryEnabled->"ENTREGA AUTOMÁTICA ATIVA";owner.busy->"ENTREGA EM ANDAMENTO";else->"LEVAR CARGA PARA ENTREGA"})}
                     }
                 }
             }
@@ -375,6 +381,8 @@ private fun StoreScreen(store: GameStore) {
 @Composable
 private fun EmployeesScreen(store: GameStore) {
     val idle=store.idleEmployee
+    var payrollNow by remember { mutableLongStateOf(currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { delay(1_000L); payrollNow = currentTimeMillis() } }
     LazyColumn(modifier=Modifier.fillMaxSize(),contentPadding=PaddingValues(12.dp),verticalArrangement=Arrangement.spacedBy(9.dp)) {
         item {
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(7.dp)){
@@ -390,7 +398,7 @@ private fun EmployeesScreen(store: GameStore) {
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Próximo pagamento", color = Steel400)
-                    Text(formatV27Duration(store.monthlyPayrollRemainingMillis), color = SafetyAmber, fontWeight = FontWeight.Bold)
+                    Text(formatV27Duration(store.monthlyPayrollRemainingMillisAt(payrollNow)), color = SafetyAmber, fontWeight = FontWeight.Bold)
                 }
                 Text("O primeiro salário é pago na contratação; depois entra na folha mensal.", style = MaterialTheme.typography.labelSmall, color = Steel400)
             }
@@ -410,16 +418,20 @@ private fun EmployeesScreen(store: GameStore) {
                     EmployeePortraitV27(employee,Modifier.size(82.dp),idle?.id==employee.id)
                     Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)){
                         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Text(employee.name,fontWeight=FontWeight.Black,color=Steel100);if(employee.legendaryCode!=null)StatePill("LENDÁRIO",RoyalPurple)}
-                        Text("${employee.specialty} • Nv.${employee.skillLevel} • ${employee.experience} min",style=MaterialTheme.typography.bodySmall,color=Steel400)
+                        Text("${roleLabelV28(employee.specialty)} • Grau ${employee.jobGrade} • Nv.${employee.skillLevel} • ${employee.experience} min",style=MaterialTheme.typography.bodySmall,color=Steel400)
+                        Text("Setor-base: ${roleAreaV28(employee.specialty)}",style=MaterialTheme.typography.labelSmall,color=ElectricBlue)
                         Text("Posto: ${machine?.let{MachineCatalog.byType(it.machineType)?.name} ?: "disponível"}",style=MaterialTheme.typography.bodySmall,color=if(machine==null)ProductionGreen else Steel200)
                         Text("Salário mensal: ${GameStore.money(employee.salaryCents)}", style=MaterialTheme.typography.bodySmall, color=SafetyAmber)
                         LinearProgressIndicator(progress=(employee.fatigue/100.0).toFloat().coerceIn(0f,1f),modifier=Modifier.fillMaxWidth())
                         Text("Fadiga ${employee.fatigue.toInt()}% • moral ${employee.morale}",style=MaterialTheme.typography.labelSmall,color=Steel400)
                     }
                 }
-                Row(Modifier.fillMaxWidth().padding(horizontal=11.dp,vertical=6.dp),horizontalArrangement=Arrangement.spacedBy(6.dp)){
-                    OutlinedButton(onClick={store.assignEmployeeNext(employee.id)},modifier=Modifier.weight(1f)){Text("Trocar posto")}
-                    OutlinedButton(onClick={store.restEmployee(employee.id)},modifier=Modifier.weight(1f)){Text("Copa")}
+                Column(Modifier.fillMaxWidth().padding(horizontal=11.dp,vertical=6.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp)){
+                        OutlinedButton(onClick={store.assignEmployeeNext(employee.id)},modifier=Modifier.weight(1f)){Text("Trocar posto")}
+                        OutlinedButton(onClick={store.restEmployee(employee.id)},modifier=Modifier.weight(1f)){Text("Copa")}
+                    }
+                    EmployeeCareerActionsV28(store, employee)
                 }
             }
         }
@@ -453,6 +465,8 @@ private fun ContractsScreen(store: GameStore) {
                 }
             }
         }
+
+        item { ContractToolAutomationV28(store) }
 
         items(filtered) { contract ->
             ContractCard(store, contract)
@@ -490,6 +504,8 @@ private fun ContractCard(store: GameStore, contract: ContractSave) {
 
         if (contract.status in setOf("AVAILABLE", "ACTIVE")) {
             Text("Ferramenta: ${tool?.name ?: "nenhuma"}", style = MaterialTheme.typography.bodySmall)
+            Text(store.toolRecommendationReason(contract.id), style = MaterialTheme.typography.labelSmall, color = ElectricBlue)
+            OutlinedButton(onClick = { store.autoBindToolForContract(contract.id) }, modifier = Modifier.fillMaxWidth()) { Text("SELECIONAR MELHOR FERRAMENTA") }
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 item {
                     AssistChip(
@@ -591,8 +607,7 @@ private fun ProgressionScreen(store: GameStore) {
 
         when (tab) {
             "METAS" -> {
-                item { DailyMissionsV27_2(store) }
-                items(store.state.goals) { goal ->
+                        items(store.state.goals) { goal ->
                     val progress = store.goalProgress(goal)
                     IndustrialCard(goal.title, "$progress/${goal.target}") {
                         LinearProgressIndicator(
@@ -935,6 +950,7 @@ private fun MoreScreen(onOpen: (Screen) -> Unit) {
                 Triple(Screen.STORE, "Loja", "Catálogo de máquinas e tecnologia premium"),
                 Triple(Screen.FINANCE, "Finanças", "Caixa e lançamentos"),
                 Triple(Screen.PROGRESSION, "Empresa, pesquisa e carreira", "Metas, galpão e árvore industrial"),
+                Triple(Screen.MISSIONS, "Central de missões", "Missões diárias e lendárias em abas próprias"),
                 Triple(Screen.PROFILE, "Meu personagem", "Avatar, skins, personagens e skills"),
                 Triple(Screen.ROULETTE, "Roleta Industrial", "Roda animada e recompensas"),
                 Triple(Screen.MINIGAME, "Desafio de precisão", "Recompensa e impulsos"),

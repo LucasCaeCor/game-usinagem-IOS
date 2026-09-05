@@ -18,7 +18,11 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import br.com.usinagemmaster.game.domain.GameStore
 import br.com.usinagemmaster.game.domain.GachaRewardDef
 import br.com.usinagemmaster.game.domain.RarityDef
@@ -27,28 +31,31 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
-private const val ROULETTE_V27 = "roulette_visual_v27"
+private const val ROULETTE_V27 = "roulette_visual_v28_readable"
 
 private data class RouletteSlice(
     val label: String,
+    val short: String,
     val glyph: String,
     val color: Color,
+    val description: String,
 )
 
 private val rouletteSlices = listOf(
-    RouletteSlice("Ferramenta", "◆", ElectricBlue),
-    RouletteSlice("Skin", "★", SafetyAmber),
-    RouletteSlice("Personagem", "●", RoyalPurple),
-    RouletteSlice("Raro", "◇", Color(0xFF4DB6AC)),
-    RouletteSlice("Épico", "✦", RoyalPurple),
-    RouletteSlice("Máquina", "⚙", SafetyAmberSoft),
-    RouletteSlice("Ferramenta", "◆", ElectricBlue),
-    RouletteSlice("Equipe lendária", "♛", Color(0xFFFFC857)),
+    RouletteSlice("Ferramenta", "FERR.", "🔧", ElectricBlue, "Brocas, fresas, pastilhas e ferramentas de processo"),
+    RouletteSlice("Skin", "SKIN", "👕", SafetyAmber, "Visual e bônus do personagem"),
+    RouletteSlice("Personagem", "PERS.", "👤", RoyalPurple, "Personagem colecionável"),
+    RouletteSlice("Raro", "RARO", "💎", Color(0xFF4DB6AC), "Recompensa de raridade rara"),
+    RouletteSlice("Épico", "ÉPICO", "✦", RoyalPurple, "Recompensa de raridade épica"),
+    RouletteSlice("Máquina", "MÁQ.", "⚙", SafetyAmberSoft, "Máquina ou tecnologia premium"),
+    RouletteSlice("Ferramenta", "FERR.", "🔩", ElectricBlue, "Ferramenta especial para contratos"),
+    RouletteSlice("Equipe lendária", "LEND.", "♛", Color(0xFFFFC857), "Funcionário lendário ou recompensa lendária"),
 )
 
 @Composable
 fun IndustrialRouletteScreen(store: GameStore) {
     val rotation = remember { Animatable(0f) }
+    val textMeasurer = rememberTextMeasurer()
     val scope = rememberCoroutineScope()
     var spinning by remember { mutableStateOf(false) }
 
@@ -125,7 +132,19 @@ fun IndustrialRouletteScreen(store: GameStore) {
                                     center.x + cos(angle).toFloat() * d * .315f,
                                     center.y + sin(angle).toFloat() * d * .315f,
                                 )
-                                drawRouletteGlyphV27(index, iconCenter, d * .050f, Color.White.copy(alpha=.94f))
+                                drawRouletteGlyphV27(index, iconCenter, d * .055f, Color.White.copy(alpha=.96f))
+                                val labelCenter = Offset(
+                                    center.x + cos(angle).toFloat() * d * .205f,
+                                    center.y + sin(angle).toFloat() * d * .205f,
+                                )
+                                val labelLayout = textMeasurer.measure(
+                                    slice.short,
+                                    style = TextStyle(color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Black),
+                                )
+                                drawText(
+                                    labelLayout,
+                                    topLeft = Offset(labelCenter.x - labelLayout.size.width / 2f, labelCenter.y - labelLayout.size.height / 2f),
+                                )
                             }
 
                             repeat(rouletteSlices.size) { index ->
@@ -179,9 +198,23 @@ fun IndustrialRouletteScreen(store: GameStore) {
                         row.forEach { slice ->
                             Surface(modifier=Modifier.weight(1f),shape=RoundedCornerShape(12.dp),color=slice.color.copy(alpha=.12f),border=androidx.compose.foundation.BorderStroke(1.dp,slice.color.copy(alpha=.24f))) {
                                 Column(Modifier.padding(vertical=8.dp,horizontal=3.dp),horizontalAlignment=Alignment.CenterHorizontally) {
-                                    Text(slice.glyph,fontWeight=FontWeight.Black,color=slice.color)
-                                    Text(slice.label,style=MaterialTheme.typography.labelSmall,maxLines=2,color=Steel100)
+                                    Text(slice.glyph,style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Black,color=slice.color)
+                                    Text(slice.label,style=MaterialTheme.typography.labelSmall,maxLines=2,color=Steel100,fontWeight=FontWeight.Bold)
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+            Surface(shape=RoundedCornerShape(14.dp), color=Steel850, border=androidx.compose.foundation.BorderStroke(1.dp,Steel700)) {
+                Column(Modifier.padding(10.dp), verticalArrangement=Arrangement.spacedBy(5.dp)) {
+                    Text("LEGENDA DA ROLETA", fontWeight=FontWeight.Black, color=Steel100)
+                    rouletteSlices.distinctBy { it.label }.forEach { slice ->
+                        Row(horizontalArrangement=Arrangement.spacedBy(7.dp), verticalAlignment=Alignment.CenterVertically) {
+                            Text(slice.glyph)
+                            Column {
+                                Text(slice.label, style=MaterialTheme.typography.labelMedium, fontWeight=FontWeight.Bold, color=slice.color)
+                                Text(slice.description, style=MaterialTheme.typography.labelSmall, color=Steel400)
                             }
                         }
                     }

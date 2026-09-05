@@ -51,6 +51,7 @@ object GameSaveCodec {
             save.bestMinigameScore,
         )
         row("PAYROLL4", save.lastPayrollCycle)
+        row("AUTO_CARGO4", save.autoCargoDelivery)
         row(
             "EXP4",
             save.expansion.specialty,
@@ -148,7 +149,7 @@ object GameSaveCodec {
             row(
                 "E", it.id, it.name, it.specialty, it.skillLevel, it.experience,
                 it.salaryCents, it.morale, it.trait, it.assignedMachineId ?: "",
-                it.legendaryCode ?: "", it.fatigue, it.restingUntil,
+                it.legendaryCode ?: "", it.fatigue, it.restingUntil, it.jobGrade,
             )
         }
         save.contracts.forEach {
@@ -181,6 +182,7 @@ object GameSaveCodec {
         var lastMinigameAt = 0L
         var bestMinigameScore = 0.0
         var lastPayrollCycle = -1L
+        var autoCargoDelivery = false
         var expansion = ExpansionSave()
         var profile = PlayerProfileSave()
         var uiSettings = UiSettingsSave()
@@ -293,6 +295,7 @@ object GameSaveCodec {
                     bestMinigameScore = p.double(2).coerceIn(0.0, 1.0)
                 }
                 "PAYROLL4" -> lastPayrollCycle = p.long(1, -1L)
+                "AUTO_CARGO4" -> autoCargoDelivery = p.bool(1)
                 // V6 expansion row.
                 "EXP" -> expansion = ExpansionSave(
                     specialty = p.text(1, "generalista"),
@@ -410,6 +413,7 @@ object GameSaveCodec {
                     legendaryCode = p.text(10).ifBlank { null },
                     fatigue = p.double(11),
                     restingUntil = p.long(12),
+                    jobGrade = p.int(13, 1).coerceIn(1, 5),
                 )
                 // V6 contract row.
                 "C" -> contracts += ContractSave(
@@ -512,6 +516,7 @@ object GameSaveCodec {
             lastMinigameAt = lastMinigameAt,
             bestMinigameScore = bestMinigameScore,
             lastPayrollCycle = lastPayrollCycle,
+            autoCargoDelivery = autoCargoDelivery,
         )
     }.getOrNull()
 

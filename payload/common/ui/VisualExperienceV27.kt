@@ -288,18 +288,19 @@ fun FactoryLayoutEditorV27(store: GameStore) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("LAYOUT DINÂMICO", color = Steel100, fontWeight = FontWeight.Black)
-                    Text("Toque numa baia vazia para mover a máquina selecionada.", style = MaterialTheme.typography.bodySmall, color = Steel400)
+                    Text("Toque numa baia vazia para mover a máquina. A grade cresce junto com a expansão do galpão.", style = MaterialTheme.typography.bodySmall, color = Steel400)
+                    Text("${store.factoryGridColumns} × ${store.factoryGridRows} baias • ${store.state.company.warehouseSpace} m²", style = MaterialTheme.typography.labelSmall, color = ElectricBlue)
                 }
                 OutlinedButton(onClick = store::autoLayoutMachines) { Text("Auto layout") }
             }
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                repeat(6) { y ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        repeat(5) { x ->
+            Column(Modifier.horizontalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                repeat(store.factoryGridRows) { y ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        repeat(store.factoryGridColumns) { x ->
                             val occupying = store.state.machines.firstOrNull { it.gridX == x && it.gridY == y }
                             val isSelected = occupying?.id == selected
                             Surface(
-                                modifier = Modifier.weight(1f).height(54.dp).clickable {
+                                modifier = Modifier.width(54.dp).height(54.dp).clickable {
                                     if (occupying != null) selected = occupying.id else if (selected != null) store.moveMachineTo(selected!!, x, y)
                                     GameFeedback.play(GameSoundEffect.UI_CLICK, store.state.uiSettings.soundEnabled)
                                 },
@@ -379,7 +380,7 @@ fun TechnicalListV27(store: GameStore) {
                             EmployeePortraitV27(employee,Modifier.size(58.dp),current?.id==employee.id)
                             Column(Modifier.weight(1f)){
                                 Text(employee.name,fontWeight=FontWeight.Black,color=Steel100)
-                                Text("${employee.specialty} • Nv.${employee.skillLevel} • ${employee.experience} min",style=MaterialTheme.typography.bodySmall,color=Steel400)
+                                Text("${roleLabelV28(employee.specialty)} • Grau ${employee.jobGrade} • Nv.${employee.skillLevel} • ${employee.experience} min",style=MaterialTheme.typography.bodySmall,color=Steel400)
                                 Text("${store.operatorFitLabel(employee.id,machine.id)} • score ${store.operatorFitScore(employee.id,machine.id)}${if(!available)" • em outro posto" else " • disponível"}",style=MaterialTheme.typography.labelSmall,color=if(available)ProductionGreen else SafetyAmber)
                             }
                         }

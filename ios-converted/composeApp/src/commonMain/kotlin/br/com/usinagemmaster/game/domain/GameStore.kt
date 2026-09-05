@@ -34,6 +34,8 @@ private const val PAYROLL_MONTH_MILLIS = 30L * DAY_MILLIS
 
 private const val VISUAL_EXPERIENCE_V27 = "visual_experience_v27"
 
+private const val V28_SYSTEMS = "v28_factory_systems_social"
+
 class GameStore {
     var state by mutableStateOf(loadOrCreate())
         private set
@@ -92,6 +94,18 @@ class GameStore {
     val machineShop
         get() = MachineType.values().mapNotNull { MachineCatalog.byType(it.name) }
 
+    val factoryExpansionStage: Int
+        get() = ((state.company.warehouseSpace - 100) / 50).coerceAtLeast(0)
+
+    val factoryGridColumns: Int
+        get() = (5 + factoryExpansionStage / 2).coerceIn(5, 10)
+
+    val factoryGridRows: Int
+        get() = (6 + (factoryExpansionStage + 1) / 2).coerceIn(6, 12)
+
+    val factoryBayCapacity: Int
+        get() = factoryGridColumns * factoryGridRows
+
     val snackActive: Boolean
         get() = state.snackUntil > currentTimeMillis()
 
@@ -133,6 +147,15 @@ class GameStore {
             val last = if (state.lastPayrollCycle < 0L) cycle else state.lastPayrollCycle
             return (((last + 1L) * PAYROLL_MONTH_MILLIS) - now).coerceAtLeast(0L)
         }
+
+    fun monthlyPayrollRemainingMillisAt(now: Long): Long {
+        val cycle = now / PAYROLL_MONTH_MILLIS
+        val last = if (state.lastPayrollCycle < 0L) cycle else state.lastPayrollCycle
+        return (((last + 1L) * PAYROLL_MONTH_MILLIS) - now).coerceAtLeast(0L)
+    }
+
+    val autoCargoDeliveryEnabled: Boolean
+        get() = state.autoCargoDelivery
 
 
     val dailyMissionResetRemainingMillis: Long
@@ -206,6 +229,9 @@ class GameStore {
             simulateSettled(settled, now, advanceClock = true)
             ensureContracts()
         }
+        if (state.autoCargoDelivery && pendingCargo.isNotEmpty() && !ownerFrame.busy && cargoInTransitIds.isEmpty()) {
+            startCargoDelivery()
+        }
         refreshFactoryInput()
     }
 
@@ -214,7 +240,7 @@ class GameStore {
         refreshFactoryInput()
         factoryFrame = factorySimulation.advance(seconds)
 
-        ownerSimulation.update(factoryMachineInputs())
+        ownerSimulation.update(factoryMachineInputs(), factoryGridColumns, factoryGridRows)
         ownerFrame = ownerSimulation.advance(seconds)
 
         if (ownerFrame.activity == OwnerActivity.AWAITING_PAYMENT && cargoInTransitIds.isNotEmpty()) {
@@ -343,11 +369,19 @@ class GameStore {
         val ids = pendingCargo.map { it.id }
         if (ids.isEmpty()) return notify("Não há carga pronta para expedição.")
 
-        ownerSimulation.update(factoryMachineInputs())
+        ownerSimulation.update(factoryMachineInputs(), factoryGridColumns, factoryGridRows)
         if (!ownerSimulation.start()) return
         cargoInTransitIds = ids // snapshot: carga criada depois fica para a próxima viagem.
         ownerFrame = ownerSimulation.snapshot()
         notify("Expedição iniciada: ${ids.size} lote(s) nesta viagem.")
+    }
+
+    fun setAutoCargoDelivery(enabled: Boolean) {
+        if (state.autoCargoDelivery == enabled) return
+        state = state.copy(autoCargoDelivery = enabled)
+        notify(if (enabled) "Entrega automática ativada: o dono despacha cargas prontas quando estiver livre." else "Entrega automática desativada.")
+        persist()
+        if (enabled && pendingCargo.isNotEmpty() && !ownerFrame.busy && cargoInTransitIds.isEmpty()) startCargoDelivery()
     }
 
     private fun settleCargoDelivery(ids: List<String>) {
@@ -441,7 +475,7 @@ class GameStore {
     fun moveMachineNext(id: String) {
         val machine = state.machines.firstOrNull { it.id == id } ?: return
         val occupied = state.machines.filterNot { it.id == id }.map { it.gridX to it.gridY }.toSet()
-        val all = (0..5).flatMap { y -> (0..4).map { x -> x to y } }
+        val all = (0 until factoryGridRows).flatMap { y -> (0 until factoryGridColumns).map { x -> x to y } }
         val currentIndex = all.indexOf(machine.gridX to machine.gridY).coerceAtLeast(0)
         val next = (1..all.size)
             .map { all[(currentIndex + it) % all.size] }
@@ -457,8 +491,8 @@ class GameStore {
 
     fun moveMachineTo(machineId: String, gridX: Int, gridY: Int) {
         val machine = state.machines.firstOrNull { it.id == machineId } ?: return notify("Máquina não encontrada.")
-        val x = gridX.coerceIn(0, 4)
-        val y = gridY.coerceIn(0, 5)
+        val x = gridX.coerceIn(0, factoryGridColumns - 1)
+        val y = gridY.coerceIn(0, factoryGridRows - 1)
         val occupied = state.machines.any { it.id != machineId && it.gridX == x && it.gridY == y }
         if (occupied) return notify("Essa baia já está ocupada.")
         state = state.copy(machines = state.machines.map { if (it.id == machine.id) it.copy(gridX = x, gridY = y) else it })
@@ -472,7 +506,7 @@ class GameStore {
             compareBy<MachineSave> { MachineCatalog.byType(it.machineType)?.specialty?.name ?: "" }
                 .thenByDescending { MachineCatalog.byType(it.machineType)?.priceCents ?: 0L }
         )
-        val positions = (0..5).flatMap { y -> (0..4).map { x -> x to y } }
+        val positions = (0 until factoryGridRows).flatMap { y -> (0 until factoryGridColumns).map { x -> x to y } }
         val byId = sorted.mapIndexed { index, machine -> machine.id to positions[index % positions.size] }.toMap()
         state = state.copy(machines = state.machines.map { machine ->
             val pos = byId[machine.id] ?: (machine.gridX to machine.gridY)
@@ -525,6 +559,46 @@ class GameStore {
             } else state.workforce,
         )
         notify("${employee.name} desligado da equipe.")
+        persistAndRefresh()
+    }
+
+    fun promotionRequirementMinutes(employeeId: String): Long {
+        val employee = state.employees.firstOrNull { it.id == employeeId } ?: return Long.MAX_VALUE
+        return (employee.jobGrade.coerceIn(1, 5) * 480L)
+    }
+
+    fun promoteEmployee(employeeId: String) {
+        val employee = state.employees.firstOrNull { it.id == employeeId } ?: return notify("Funcionário não encontrado.")
+        if (employee.jobGrade >= 5) return notify("${employee.name} já está no grau máximo da carreira interna.")
+        val requirement = promotionRequirementMinutes(employeeId)
+        if (employee.experience < requirement) return notify("${employee.name} precisa de ${requirement - employee.experience} min de experiência para a próxima promoção.")
+        val raise = (employee.salaryCents * 12L / 100L).coerceAtLeast(20_000L)
+        state = state.copy(employees = state.employees.map { current ->
+            if (current.id == employeeId) current.copy(
+                jobGrade = (current.jobGrade + 1).coerceAtMost(5),
+                skillLevel = (current.skillLevel + 1).coerceAtMost(20),
+                salaryCents = current.salaryCents + raise,
+                morale = (current.morale + 6).coerceAtMost(100),
+            ) else current
+        })
+        notify("${employee.name} promovido para Grau ${employee.jobGrade + 1}. Skill e salário foram atualizados.")
+        persistAndRefresh()
+    }
+
+    fun crossTrainEmployee(employeeId: String, specialty: String) {
+        val employee = state.employees.firstOrNull { it.id == employeeId } ?: return notify("Funcionário não encontrado.")
+        if (employee.legendaryCode != null) return notify("Lendários mantêm sua função exclusiva.")
+        if (employee.jobGrade < 2 || employee.experience < 720L) return notify("Treinamento cruzado libera no Grau 2 e com 720 min de experiência.")
+        val valid = EmployeeSpecialty.values().firstOrNull { it.name == specialty } ?: return notify("Função inválida.")
+        if (employee.specialty == valid.name) return notify("${employee.name} já exerce essa função.")
+        val cost = (employee.salaryCents / 2L).coerceAtLeast(100_000L)
+        if (state.company.cashCents < cost) return notify("Caixa insuficiente para o treinamento (${money(cost)}).")
+        state = state.copy(
+            company = state.company.copy(cashCents = state.company.cashCents - cost),
+            employees = state.employees.map { if (it.id == employeeId) it.copy(specialty = valid.name, assignedMachineId = null, morale = (it.morale + 4).coerceAtMost(100)) else it },
+            finances = addFinance(state.finances, "EXPENSE", "TRAINING", cost, "Treinamento cruzado: ${employee.name} → ${valid.name}"),
+        )
+        notify("${employee.name} agora está habilitado como ${valid.name}.")
         persistAndRefresh()
     }
 
@@ -616,7 +690,20 @@ class GameStore {
                 if (it.id == id) it.copy(status = "ACTIVE", startedAt = now) else it
             }
         )
-        notify("Contrato de ${contract.clientName} aceito.")
+
+        // V28: active contracts automatically reserve the best currently-free tool.
+        // The tool remains only reserved here; consumption still happens when the contract settles.
+        val bestTool = bestToolForContract(id)
+        if (bestTool != null) {
+            state = state.copy(
+                expansion = state.expansion.copy(
+                    contractTools = state.expansion.contractTools + (id to bestTool.id)
+                )
+            )
+            notify("Contrato de ${contract.clientName} aceito • ${bestTool.name} reservada automaticamente.")
+        } else {
+            notify("Contrato de ${contract.clientName} aceito • nenhuma ferramenta livre para reservar.")
+        }
         persist()
     }
 
@@ -671,6 +758,62 @@ class GameStore {
             bindings[contractId] = toolId
         }
         state = state.copy(expansion = state.expansion.copy(contractTools = bindings))
+        persist()
+    }
+
+    fun bestToolForContract(contractId: String): ToolDef? {
+        val contract = state.contracts.firstOrNull { it.id == contractId } ?: return null
+        val bindings = state.expansion.contractTools
+        return GameProgression.tools
+            .filter { tool ->
+                val inventory = state.expansion.tools[tool.id] ?: 0
+                val reserved = bindings.count { (cid, tid) -> cid != contractId && tid == tool.id }
+                inventory > reserved
+            }
+            .maxByOrNull { toolSuitabilityScore(contract, it) }
+    }
+
+    fun toolRecommendationReason(contractId: String): String {
+        val contract = state.contracts.firstOrNull { it.id == contractId } ?: return "Contrato indisponível"
+        val tool = bestToolForContract(contractId) ?: return "Sem ferramenta livre"
+        return when {
+            contract.requiredQuality >= 88 || contract.difficulty >= 5 -> "${tool.name} • prioridade: qualidade e estabilidade"
+            contract.requiredQuality >= 76 || contract.difficulty >= 3 -> "${tool.name} • melhor equilíbrio entre qualidade e velocidade"
+            else -> "${tool.name} • prioridade: produtividade"
+        }
+    }
+
+    fun autoBindToolForContract(contractId: String) {
+        val contract = state.contracts.firstOrNull { it.id == contractId } ?: return notify("Contrato não encontrado.")
+        if (contract.status !in setOf("AVAILABLE", "ACTIVE")) return notify("Esse contrato não aceita mais reserva de ferramenta.")
+        val tool = bestToolForContract(contractId) ?: return notify("Nenhuma ferramenta disponível para este contrato.")
+        bindTool(contractId, tool.id)
+        notify("${tool.name} reservada automaticamente para ${contract.clientName}.")
+    }
+
+    fun autoDistributeContractTools() {
+        val eligible = state.contracts
+            .filter { it.status in setOf("ACTIVE", "AVAILABLE") }
+            .sortedWith(compareBy<ContractSave> { if (it.status == "ACTIVE") 0 else 1 }.thenByDescending { it.requiredQuality }.thenByDescending { it.difficulty })
+        if (eligible.isEmpty()) return notify("Não há contratos para distribuir ferramentas.")
+
+        val remaining = state.expansion.tools.toMutableMap()
+        val newBindings = state.expansion.contractTools.filterKeys { cid -> state.contracts.none { it.id == cid && it.status in setOf("ACTIVE", "AVAILABLE") } }.toMutableMap()
+        var assigned = 0
+        eligible.forEach { contract ->
+            val tool = GameProgression.tools
+                .filter { (remaining[it.id] ?: 0) > 0 }
+                .maxByOrNull { toolSuitabilityScore(contract, it) }
+            if (tool != null) {
+                newBindings[contract.id] = tool.id
+                remaining[tool.id] = (remaining[tool.id] ?: 0) - 1
+                assigned++
+            } else {
+                newBindings.remove(contract.id)
+            }
+        }
+        state = state.copy(expansion = state.expansion.copy(contractTools = newBindings))
+        notify("Ferramentaria automática: $assigned contrato(s) receberam a melhor ferramenta disponível.")
         persist()
     }
 
@@ -780,7 +923,8 @@ class GameStore {
         )
         if (machines.isEmpty()) return notify("Instale máquinas antes de distribuir a equipe.")
         val now = currentTimeMillis()
-        val remaining = state.employees.filter { it.restingUntil <= now }.toMutableList()
+        val supportRoles = setOf("STOCK_ASSISTANT", "QUALITY_INSPECTOR", "CNC_PROGRAMMER")
+        val remaining = state.employees.filter { it.restingUntil <= now && it.specialty !in supportRoles }.toMutableList()
         if (remaining.isEmpty()) return notify("Nenhum operador está disponível neste momento.")
         val assignments = linkedMapOf<String, String>()
         machines.forEach { machine ->
@@ -793,6 +937,30 @@ class GameStore {
             employee.copy(assignedMachineId = machineId)
         })
         notify("Equipe distribuída automaticamente: melhor encaixe entre especialidade, experiência, moral e fadiga.")
+        persistAndRefresh()
+    }
+
+    fun syncRemoteHire(ownerUid: String?, name: String?, boostPct: Int, endsAt: Long) {
+        val active = ownerUid != null && endsAt > currentTimeMillis()
+        val next = if (active) state.expansion.copy(
+            remoteHireOwnerUid = ownerUid,
+            remoteHireName = name,
+            remoteHireBoostPct = boostPct.coerceIn(0, 25),
+            remoteHireEndsAt = endsAt,
+        ) else state.expansion.copy(
+            remoteHireOwnerUid = null, remoteHireName = null, remoteHireBoostPct = 0, remoteHireEndsAt = 0L,
+        )
+        if (next != state.expansion) { state = state.copy(expansion = next); persistAndRefresh() }
+    }
+
+    fun claimRemoteOperationXp(token: String, xp: Long) {
+        if (token.isBlank() || token in state.expansion.claimedRentalXpIds) return
+        val safeXp = xp.coerceIn(0L, 2_000L)
+        state = state.copy(expansion = state.expansion.copy(
+            playerXp = state.expansion.playerXp + safeXp,
+            claimedRentalXpIds = state.expansion.claimedRentalXpIds + token,
+        ))
+        notify("Trabalho externo concluído • +$safeXp XP do personagem.")
         persistAndRefresh()
     }
 
@@ -1665,13 +1833,16 @@ class GameStore {
         }
 
         val baseModifiers = GameProgression.modifiers(save.expansion)
+        val remoteProfessionalMultiplier = if (save.expansion.remoteHireEndsAt > now) {
+            1.0 + save.expansion.remoteHireBoostPct.coerceIn(0, 25) / 100.0
+        } else 1.0
         val base = ProductionEngine.calculate(
             machines = machineRuntime,
             employees = employeeRuntime,
             idleEmployeeIds = idleIds,
             modifiers = baseModifiers.copy(
                 globalSpeedMultiplier =
-                    baseModifiers.globalSpeedMultiplier * save.career.automationSpeedMultiplier(),
+                    baseModifiers.globalSpeedMultiplier * save.career.automationSpeedMultiplier() * remoteProfessionalMultiplier,
                 qualityBonus =
                     baseModifiers.qualityBonus + save.career.automationQualityBonus(),
                 energyMultiplier =
@@ -1704,9 +1875,11 @@ class GameStore {
                 workers = factoryWorkerInputs(),
                 open = WorkLifeRules.factoryOpen(state.shiftMode, currentTimeMillis()),
                 cycleStartedAt = state.company.lastSimulationAt,
+                gridColumns = factoryGridColumns,
+                gridRows = factoryGridRows,
             )
         )
-        ownerSimulation.update(factoryMachineInputs())
+        ownerSimulation.update(factoryMachineInputs(), factoryGridColumns, factoryGridRows)
         factoryFrame = factorySimulation.snapshot().copy(
             owner = ownerSimulation.snapshot(),
             cargoInTransit = cargoInTransitIds,
@@ -1726,6 +1899,7 @@ class GameStore {
                 condition = machine.condition,
                 productive = mp?.isOperating == true,
                 unitsPerHour = mp?.unitsPerHour ?: 0.0,
+                machineType = machine.machineType,
             )
         }
     }
@@ -1742,6 +1916,7 @@ class GameStore {
                 onPhone = state.snackUntil <= now &&
                     state.workforce.idleEmployeeId == employee.id &&
                     state.workforce.idleUntilAt > now,
+                specialty = employee.specialty,
             )
         }
     }
@@ -2142,19 +2317,29 @@ class GameStore {
 
     private fun freeGridPosition(): Pair<Int, Int>? {
         val occupied = state.machines.map { it.gridX to it.gridY }.toSet()
-        for (y in 0..5) for (x in 0..4) {
+        for (y in 0 until factoryGridRows) for (x in 0 until factoryGridColumns) {
             if ((x to y) !in occupied) return x to y
         }
         return null
     }
 
+    private fun toolSuitabilityScore(contract: ContractSave, tool: ToolDef): Double {
+        val qualityPressure = ((contract.requiredQuality - 60).coerceAtLeast(0) / 12.0) + contract.difficulty * .42
+        val qualityWeight = 1.4 + qualityPressure
+        val speedScore = (tool.speedMultiplier - 1.0) * 100.0
+        val qualityScore = tool.qualityBonus * qualityWeight
+        val highQualityPenalty = if (contract.requiredQuality >= 80 && tool.qualityBonus < 0) 120.0 else 0.0
+        return speedScore + qualityScore + tool.rarity.rank * 1.5 - highQualityPenalty
+    }
+
     private fun operatorFitScore(employee: EmployeeSave, machine: MachineSave): Int {
         val specialty = MachineCatalog.byType(machine.machineType)?.specialty?.name
+        val supportPenalty = if (employee.specialty in setOf("STOCK_ASSISTANT", "QUALITY_INSPECTOR", "CNC_PROGRAMMER") && employee.specialty != specialty) -70 else 0
         val specialtyBonus = if (employee.specialty == specialty) 60 else 0
         val skillBonus = employee.skillLevel.coerceIn(1, 20) * 9
         val experienceBonus = (employee.experience / 240L).toInt().coerceAtMost(25)
         val moraleBonus = employee.morale.coerceIn(0, 100) / 5
-        val fatiguePenalty = (employee.fatigue.coerceIn(0.0, 100.0) / 4.0).toInt()
+        val fatiguePenalty = (employee.fatigue.coerceIn(0.0, 1.0) * 25.0).toInt()
         val currentBonus = if (employee.assignedMachineId == machine.id) 6 else 0
         val legendaryBonus = if (employee.legendaryCode != null) 12 else 0
         val traitBonus = when {
@@ -2164,7 +2349,7 @@ class GameStore {
             employee.trait.contains("Cuidad", ignoreCase = true) -> 5
             else -> 0
         }
-        return specialtyBonus + skillBonus + experienceBonus + moraleBonus + currentBonus + legendaryBonus + traitBonus - fatiguePenalty
+        return specialtyBonus + supportPenalty + skillBonus + experienceBonus + moraleBonus + currentBonus + legendaryBonus + traitBonus - fatiguePenalty
     }
 
     private fun durationCompact(value: Long): String {

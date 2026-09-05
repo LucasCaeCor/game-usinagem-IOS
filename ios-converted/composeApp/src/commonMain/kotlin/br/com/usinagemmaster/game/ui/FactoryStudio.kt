@@ -65,7 +65,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-private const val FACTORY_STUDIO_V27 = "factory_studio_v27_5"
+private const val FACTORY_STUDIO_V27 = "factory_studio_v28_dynamic"
 
 @Composable
 fun FactoryStudio(
@@ -93,7 +93,10 @@ fun FactoryStudio(
             FactoryMachineInput(it.id, it.gridX, it.gridY, it.installed, it.condition)
         }
     }
-    val sceneFloor = remember(machineInputs) { FactoryFloor(machineInputs) }
+    val sceneFloor = remember(machineInputs, store.factoryGridColumns, store.factoryGridRows) {
+        FactoryFloor(machineInputs, store.factoryGridColumns, store.factoryGridRows)
+    }
+    val sceneHeight = (560 + store.factoryExpansionStage * 38).coerceIn(560, 900).dp
 
     val transition = rememberInfiniteTransition(label = "factory_studio_v25")
     val workPhase by transition.animateFloat(
@@ -130,10 +133,10 @@ fun FactoryStudio(
         }
     }
 
-    var ownerWorkCell by remember { mutableStateOf(FactoryFloor.ENTRY) }
-    var ownerWorkRoute by remember { mutableStateOf(listOf(FactoryFloor.ENTRY.point())) }
+    var ownerWorkCell by remember(sceneFloor.width, sceneFloor.height) { mutableStateOf(sceneFloor.entry) }
+    var ownerWorkRoute by remember(sceneFloor.width, sceneFloor.height) { mutableStateOf(listOf(sceneFloor.entry.point())) }
     val ownerWorkProgress = remember { Animatable(1f) }
-    var reprimandRoute by remember { mutableStateOf(listOf(FactoryFloor.ENTRY.point())) }
+    var reprimandRoute by remember(sceneFloor.width, sceneFloor.height) { mutableStateOf(listOf(sceneFloor.entry.point())) }
     val reprimandProgress = remember { Animatable(1f) }
 
     LaunchedEffect(batch?.id, batch?.stage, machineInputs) {
@@ -180,7 +183,7 @@ fun FactoryStudio(
         frame.owner.busy -> null
         reprimandTargetId != null -> studioRoutePoint(reprimandRoute, reprimandProgress.value)
         batch != null -> studioRoutePoint(ownerWorkRoute, ownerWorkProgress.value)
-        else -> FactoryFloor.ENTRY.point()
+        else -> sceneFloor.entry.point()
     }
     val ownerWalking = when {
         frame.owner.busy -> frame.owner.walking
@@ -196,20 +199,27 @@ fun FactoryStudio(
         colors = CardDefaults.elevatedCardColors(containerColor = Steel900),
     ) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(Modifier.weight(1f)) {
-                    Text("CHÃO DE FÁBRICA • INTERATIVO", fontWeight = FontWeight.Black, color = Steel100)
-                    Text(
-                        if (frame.open) "Turno ativo • toque em máquinas, operadores, Q, P e E" else "Turno fechado • equipe em descanso",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (frame.open) ProductionGreen else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    SmallZoomButton(if (cameraMode) "CÂMERA ✓" else "CÂMERA") { cameraMode = !cameraMode }
-                    SmallZoomButton("−") { zoom = (zoom - .18f).coerceIn(.78f, 3.25f) }
+            Column(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("FÁBRICA VIVA • CHÃO DE FÁBRICA", fontWeight = FontWeight.Black, color = Steel100)
+                Text(
+                    if (frame.open) "Turno ativo • toque em máquinas e operadores • setores S/F/Q/P/C/E visíveis no piso" else "Turno fechado • equipe em descanso",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (frame.open) ProductionGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "Galpão ${store.state.company.warehouseSpace} m² • ${store.factoryGridColumns}×${store.factoryGridRows} baias • expansão altera o espaço físico da cena",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Steel400,
+                )
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    SmallZoomButton(if (cameraMode) "INTERAGIR" else "CÂMERA") { cameraMode = !cameraMode }
+                    SmallZoomButton("−") { zoom = (zoom - .25f).coerceIn(.65f, 5.5f) }
                     SmallZoomButton("${(zoom * 100).toInt()}%") { zoom = 1f; pan = Offset.Zero }
-                    SmallZoomButton("+") { zoom = (zoom + .18f).coerceIn(.78f, 3.25f) }
+                    SmallZoomButton("+") { zoom = (zoom + .25f).coerceIn(.65f, 5.5f) }
+                    SmallZoomButton("ENCAIXAR") { zoom = 1f; pan = Offset.Zero }
                 }
             }
 
@@ -218,7 +228,7 @@ fun FactoryStudio(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(610.dp)
+                    .height(sceneHeight)
                     .background(Steel950, RoundedCornerShape(18.dp))
                     .border(1.dp, Steel700, RoundedCornerShape(18.dp))
                     .then(
@@ -229,8 +239,8 @@ fun FactoryStudio(
                                 while (event.changes.any { it.pressed }) {
                                     val zoomChange = event.calculateZoom()
                                     val panChange = event.calculatePan()
-                                    zoom = (zoom * zoomChange).coerceIn(.78f, 3.25f)
-                                    pan = studioClampPan(pan + panChange, zoom)
+                                    zoom = (zoom * zoomChange).coerceIn(.65f, 5.5f)
+                                    pan = studioClampPan(pan + panChange, zoom, sceneFloor)
                                     event.changes.forEach { it.consume() }
                                     event = awaitPointerEvent()
                                 }
@@ -238,7 +248,7 @@ fun FactoryStudio(
                         } else Modifier
                     ),
             ) {
-                Canvas(modifier = Modifier.matchParentSize()) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
                     drawFactoryStudioScene(
                         store = store,
                         frame = frame,
@@ -252,6 +262,7 @@ fun FactoryStudio(
                         phase = workPhase,
                         pulse = pulse,
                         textMeasurer = textMeasurer,
+                        floor = sceneFloor,
                     )
                 }
 
@@ -262,6 +273,7 @@ fun FactoryStudio(
                         batch = batch,
                         zoom = zoom,
                         pan = pan,
+                        floor = sceneFloor,
                         onMachineClick = { id ->
                             selectedMachineId = id
                             selectedWorkerId = null
@@ -423,6 +435,7 @@ private fun StudioInteractionLayerV27_5(
     batch: OwnerWorkBatchSave?,
     zoom: Float,
     pan: Offset,
+    floor: FactoryFloor,
     onMachineClick: (String) -> Unit,
     onWorkerClick: (String) -> Unit,
     onQualityClick: () -> Unit,
@@ -433,18 +446,18 @@ private fun StudioInteractionLayerV27_5(
         val density = LocalDensity.current
         val widthPx = with(density) { maxWidth.toPx() }
         val heightPx = with(density) { maxHeight.toPx() }
-        val base = studioBaseTile(widthPx, heightPx) * zoom
-        fun projected(point: FloorPoint): Offset = studioProject(point, widthPx, heightPx, zoom, pan)
+        val base = studioBaseTile(widthPx, heightPx, floor) * zoom
+        fun projected(point: FloorPoint): Offset = studioProject(point, widthPx, heightPx, zoom, pan, floor)
 
         // Estações de fluxo: hit targets Compose independentes do Canvas.
-        StudioTapTargetV27_5(projected(FactoryFloor.INSPECTION.point()), 64.dp, 64.dp, "Qualidade", onQualityClick)
-        StudioTapTargetV27_5(projected(FactoryFloor.STAGING.point()), 64.dp, 64.dp, "Preparação", onStagingClick)
-        StudioTapTargetV27_5(projected(FactoryFloor.SHIPPING.point()), 64.dp, 64.dp, "Expedição", onShippingClick)
+        StudioTapTargetV27_5(projected(floor.inspection.point()), 64.dp, 64.dp, "Qualidade", onQualityClick)
+        StudioTapTargetV27_5(projected(floor.staging.point()), 64.dp, 64.dp, "Preparação", onStagingClick)
+        StudioTapTargetV27_5(projected(floor.shipping.point()), 64.dp, 64.dp, "Expedição", onShippingClick)
 
         // Máquinas: retângulo acompanha o volume visual da silhueta, não apenas um ponto central.
         store.state.machines.filter { it.installed }.forEach { machine ->
             val input = FactoryMachineInput(machine.id, machine.gridX, machine.gridY, machine.installed, machine.condition)
-            val center = projected(FactoryFloor.bay(input).point()) + Offset(0f, -base * .42f)
+            val center = projected(floor.bayFor(input).point()) + Offset(0f, -base * .42f)
             StudioTapTargetV27_5(center, 72.dp, 58.dp, MachineCatalog.byType(machine.machineType)?.name ?: machine.machineType) {
                 onMachineClick(machine.id)
             }
@@ -515,12 +528,13 @@ private fun DrawScope.drawFactoryStudioScene(
     phase: Float,
     pulse: Float,
     textMeasurer: androidx.compose.ui.text.TextMeasurer,
+    floor: FactoryFloor,
 ) {
-    val baseTileW = min(size.width / 24f, size.height / 19f)
+    val baseTileW = studioBaseTile(size.width, size.height, floor)
     val halfW = baseTileW * zoom
     val stepX = halfW * .91f
     val stepY = halfW * .60f
-    val origin = Offset(size.width * .075f + pan.x, size.height * .245f + pan.y)
+    val origin = Offset(size.width * .075f + pan.x, size.height * .22f + pan.y)
 
     fun project(p: FloorPoint): Offset = Offset(
         origin.x + p.x * stepX,
@@ -569,47 +583,51 @@ private fun DrawScope.drawFactoryStudioScene(
     // Galpão isométrico.
     val floorPath = Path().apply {
         moveTo(project(FloorPoint(0f, 0f)).x, project(FloorPoint(0f, 0f)).y)
-        lineTo(project(FloorPoint(FactoryFloor.WIDTH.toFloat(), 0f)).x, project(FloorPoint(FactoryFloor.WIDTH.toFloat(), 0f)).y)
-        lineTo(project(FloorPoint(FactoryFloor.WIDTH.toFloat(), FactoryFloor.HEIGHT.toFloat())).x, project(FloorPoint(FactoryFloor.WIDTH.toFloat(), FactoryFloor.HEIGHT.toFloat())).y)
-        lineTo(project(FloorPoint(0f, FactoryFloor.HEIGHT.toFloat())).x, project(FloorPoint(0f, FactoryFloor.HEIGHT.toFloat())).y)
+        lineTo(project(FloorPoint(floor.width.toFloat(), 0f)).x, project(FloorPoint(floor.width.toFloat(), 0f)).y)
+        lineTo(project(FloorPoint(floor.width.toFloat(), floor.height.toFloat())).x, project(FloorPoint(floor.width.toFloat(), floor.height.toFloat())).y)
+        lineTo(project(FloorPoint(0f, floor.height.toFloat())).x, project(FloorPoint(0f, floor.height.toFloat())).y)
         close()
     }
     drawPath(floorPath, Color(0xFF28343A))
     drawPath(floorPath, Color(0xFF66737A), style = Stroke(1.5f))
 
     // Linhas de piso / faixas de segurança.
-    for (x in 0..FactoryFloor.WIDTH step 4) {
-        drawLine(Color.White.copy(alpha = .055f), project(FloorPoint(x.toFloat(), 0f)), project(FloorPoint(x.toFloat(), FactoryFloor.HEIGHT.toFloat())), 1f)
+    for (x in 0..floor.width step 4) {
+        drawLine(Color.White.copy(alpha = .055f), project(FloorPoint(x.toFloat(), 0f)), project(FloorPoint(x.toFloat(), floor.height.toFloat())), 1f)
     }
-    for (y in 0..FactoryFloor.HEIGHT step 4) {
-        drawLine(Color.White.copy(alpha = .055f), project(FloorPoint(0f, y.toFloat())), project(FloorPoint(FactoryFloor.WIDTH.toFloat(), y.toFloat())), 1f)
+    for (y in 0..floor.height step 4) {
+        drawLine(Color.White.copy(alpha = .055f), project(FloorPoint(0f, y.toFloat())), project(FloorPoint(floor.width.toFloat(), y.toFloat())), 1f)
     }
 
     drawLine(
         SafetyAmber.copy(alpha = .58f),
-        project(FloorPoint(0f, 21.8f)),
-        project(FloorPoint(20f, 21.8f)),
+        project(FloorPoint(0f, floor.height * .91f)),
+        project(FloorPoint(floor.width.toFloat(), floor.height * .91f)),
         (halfW * .10f).coerceAtLeast(2f),
     )
     drawLine(
         Color.White.copy(alpha = .18f),
-        project(FloorPoint(0f, 19.7f)),
-        project(FloorPoint(20f, 19.7f)),
+        project(FloorPoint(0f, floor.height * .82f)),
+        project(FloorPoint(floor.width.toFloat(), floor.height * .82f)),
         (halfW * .04f).coerceAtLeast(1f),
     )
 
-    drawZone(project(FactoryFloor.STOCK.point()), halfW, Color(0xFF735327))
-    drawZone(project(FactoryFloor.TOOLS.point()), halfW, Color(0xFF315D79))
-    drawZone(project(FactoryFloor.INSPECTION.point()), halfW, Color(0xFF4B457A))
-    drawZone(project(FactoryFloor.STAGING.point()), halfW, if (store.pendingCargo.isNotEmpty()) SafetyAmber else Color(0xFF65552F))
-    drawZone(project(FactoryFloor.BREAK_ROOM.point()), halfW, Color(0xFF376548))
-    drawZone(project(FactoryFloor.SHIPPING.point()), halfW, ElectricBlue)
-    drawStationMarkerV27_2(project(FactoryFloor.STOCK.point()), halfW, "A", "ALMOX", textMeasurer)
-    drawStationMarkerV27_2(project(FactoryFloor.TOOLS.point()), halfW, "F", "FERR.", textMeasurer)
-    drawStationMarkerV27_2(project(FactoryFloor.INSPECTION.point()), halfW, "Q", "QUALIDADE", textMeasurer)
-    drawStationMarkerV27_2(project(FactoryFloor.STAGING.point()), halfW, "P", "PREPARAÇÃO", textMeasurer)
-    drawStationMarkerV27_2(project(FactoryFloor.BREAK_ROOM.point()), halfW, "C", "COPA", textMeasurer)
-    drawStationMarkerV27_2(project(FactoryFloor.SHIPPING.point()), halfW, "E", "EXPEDIÇÃO", textMeasurer)
+    drawZone(project(floor.stock.point()), halfW, Color(0xFF735327))
+    drawZone(project(floor.tools.point()), halfW, Color(0xFF315D79))
+    drawZone(project(floor.inspection.point()), halfW, Color(0xFF4B457A))
+    drawZone(project(floor.staging.point()), halfW, if (store.pendingCargo.isNotEmpty()) SafetyAmber else Color(0xFF65552F))
+    drawZone(project(floor.breakRoom.point()), halfW, Color(0xFF376548))
+    drawZone(project(floor.shipping.point()), halfW, ElectricBlue)
+    drawZone(project(floor.cncDesk.point()), halfW, Color(0xFF28556D))
+    drawZone(project(floor.maintenance.point()), halfW, Color(0xFF76513A))
+    drawStationMarkerV27_2(project(floor.stock.point()), halfW, "S", "ESTOQUE", textMeasurer)
+    drawStationMarkerV27_2(project(floor.tools.point()), halfW, "F", "FERRAMENTAS", textMeasurer)
+    drawStationMarkerV27_2(project(floor.inspection.point()), halfW, "Q", "QUALIDADE", textMeasurer)
+    drawStationMarkerV27_2(project(floor.staging.point()), halfW, "P", "PREPARAÇÃO", textMeasurer)
+    drawStationMarkerV27_2(project(floor.breakRoom.point()), halfW, "C", "COPA", textMeasurer)
+    drawStationMarkerV27_2(project(floor.shipping.point()), halfW, "E", "EXPEDIÇÃO", textMeasurer)
+    drawStationMarkerV27_2(project(floor.cncDesk.point()), halfW, "N", "PROG. CNC", textMeasurer)
+    drawStationMarkerV27_2(project(floor.maintenance.point()), halfW, "M", "MANUT.", textMeasurer)
 
     // Máquinas desenhadas por estado e tipo.
     store.state.machines.forEach { machine ->
@@ -617,7 +635,7 @@ private fun DrawScope.drawFactoryStudioScene(
             id = machine.id, gridX = machine.gridX, gridY = machine.gridY,
             installed = machine.installed, condition = machine.condition
         )
-        val at = project(FactoryFloor.bay(input).point())
+        val at = project(floor.bayFor(input).point())
         val machineFrame = frame.machines.firstOrNull { it.id == machine.id }
         val color = when (machineFrame?.state) {
             FactoryMachineState.RUNNING -> ProductionGreen
@@ -738,7 +756,7 @@ private fun DrawScope.drawFactoryStudioScene(
                 val employee = store.state.employees.firstOrNull { it.id == worker.id }
                 if (employee != null) {
                     val phraseIndex = (slot + kotlin.math.abs(employee.id.hashCode()).toLong()).toInt()
-                    val working = worker.activity in setOf(WorkerActivity.WORKING, WorkerActivity.SETTING_UP, WorkerActivity.CARRYING_PART, WorkerActivity.INSPECTING)
+                    val working = worker.activity in setOf(WorkerActivity.WORKING, WorkerActivity.SETTING_UP, WorkerActivity.CARRYING_PART, WorkerActivity.INSPECTING, WorkerActivity.STOCKING, WorkerActivity.QUALITY_SUPPORT, WorkerActivity.PROGRAMMING)
                     val quote = LegendaryEmployeeCatalog.quote(employee.legendaryCode, working, phraseIndex)
                         ?: studioWorkerQuoteV27(employee, worker.activity, phraseIndex)
                     val side = if ((slot and 1L) == 0L) .34f else -.34f
@@ -783,6 +801,9 @@ private fun studioWorkerQuoteV27(employee: EmployeeSave, activity: WorkerActivit
         WorkerActivity.SETTING_UP -> listOf("Setup quase pronto.", "Alinhamento conferido. Falta pouco.")
         WorkerActivity.INSPECTING -> listOf("Conferindo medida e acabamento.", "Vou medir de novo antes de liberar.")
         WorkerActivity.CARRYING_PART -> listOf("Levando o lote pra próxima etapa.", "Peças indo para o próximo setor.")
+        WorkerActivity.STOCKING -> listOf("Conferindo entrada e saída do estoque.", "Material separado para a próxima ordem.")
+        WorkerActivity.QUALITY_SUPPORT -> listOf("Apoio de qualidade em andamento.", "Vou liberar somente o que estiver conforme.")
+        WorkerActivity.PROGRAMMING -> listOf("Programa CNC revisado. Vou conferir os offsets.", "Preparando programa e sequência de usinagem.")
         WorkerActivity.WORKING -> if (employee.specialty.contains("CNC", true))
             listOf("Offset conferido. Programa rodando.", "CNC estável. Vou manter o ritmo.")
         else listOf("Cavaco saindo bonito hoje.", "Máquina redonda. Produção seguindo.")
@@ -986,6 +1007,9 @@ private fun DrawScope.drawWorker(
         WorkerActivity.PHONE -> Color(0xFFE76E6E)
         WorkerActivity.BREAK -> Color(0xFF62B889)
         WorkerActivity.WORKING -> Color(0xFF3974A8)
+        WorkerActivity.STOCKING -> Color(0xFFB67A32)
+        WorkerActivity.QUALITY_SUPPORT -> Color(0xFF6758A8)
+        WorkerActivity.PROGRAMMING -> Color(0xFF257B95)
         WorkerActivity.FETCHING_MATERIAL, WorkerActivity.FETCHING_TOOLS, WorkerActivity.CARRYING_PART -> Color(0xFFB67A32)
         else -> Color(0xFF496473)
     }
@@ -1109,13 +1133,17 @@ private fun DrawScope.drawWorkerActivityProp(
     }
 }
 
-private fun studioBaseTile(width: Float, height: Float): Float = min(width / 24f, height / 19f)
+private fun studioBaseTile(width: Float, height: Float, floor: FactoryFloor): Float {
+    val horizontal = width / (floor.width * .91f + 7f)
+    val vertical = height / (floor.height * .60f + 10f)
+    return min(horizontal, vertical).coerceAtLeast(4f)
+}
 
-private fun studioProject(p: FloorPoint, width: Float, height: Float, zoom: Float, pan: Offset): Offset {
-    val halfW = studioBaseTile(width, height) * zoom
+private fun studioProject(p: FloorPoint, width: Float, height: Float, zoom: Float, pan: Offset, floor: FactoryFloor): Offset {
+    val halfW = studioBaseTile(width, height, floor) * zoom
     val stepX = halfW * .91f
     val stepY = halfW * .60f
-    val origin = Offset(width * .075f + pan.x, height * .245f + pan.y)
+    val origin = Offset(width * .075f + pan.x, height * .22f + pan.y)
     return Offset(origin.x + p.x * stepX, origin.y + p.y * stepY)
 }
 
@@ -1125,14 +1153,16 @@ private fun studioDistance(a: Offset, b: Offset): Float {
     return kotlin.math.sqrt(dx * dx + dy * dy)
 }
 
-private fun studioClampPan(pan: Offset, zoom: Float): Offset {
-    val limitX = 620f * zoom
-    val limitY = 520f * zoom
+private fun studioClampPan(pan: Offset, zoom: Float, floor: FactoryFloor): Offset {
+    val expansionX = (floor.width - FactoryFloor.WIDTH).coerceAtLeast(0) * 18f
+    val expansionY = (floor.height - FactoryFloor.HEIGHT).coerceAtLeast(0) * 14f
+    val limitX = (620f + expansionX) * zoom
+    val limitY = (520f + expansionY) * zoom
     return Offset(pan.x.coerceIn(-limitX, limitX), pan.y.coerceIn(-limitY, limitY))
 }
 
 private fun studioRoutePoint(route: List<FloorPoint>, progress: Float): FloorPoint {
-    if (route.isEmpty()) return FactoryFloor.ENTRY.point()
+    if (route.isEmpty()) return FloorPoint(0f, 0f)
     if (route.size == 1) return route.first()
     val scaled = progress.coerceIn(0f, 1f) * (route.size - 1)
     val index = scaled.toInt().coerceIn(0, route.lastIndex)
@@ -1163,18 +1193,18 @@ private fun studioBatchTargetCell(
         val machine = machines.firstOrNull { it.id == batch?.machineId }
         if (machine != null) {
             floor.nearestWalkable(
-                FactoryFloor.bay(
+                floor.bayFor(
                     FactoryMachineInput(machine.id, machine.gridX, machine.gridY, machine.installed, machine.condition)
                 ).point()
             )
-        } else FactoryFloor.ENTRY
+        } else floor.entry
     }
-    ProductionStage.WAITING_QC, ProductionStage.QC, ProductionStage.APPROVED -> FactoryFloor.INSPECTION
-    ProductionStage.PACKING, ProductionStage.READY_TO_SHIP -> FactoryFloor.STAGING
-    ProductionStage.SHIPPED -> FactoryFloor.SHIPPING
-    ProductionStage.RAW, ProductionStage.WAITING_MACHINE -> FactoryFloor.STOCK
-    ProductionStage.SCRAP -> FactoryFloor.STAGING
-    null -> FactoryFloor.ENTRY
+    ProductionStage.WAITING_QC, ProductionStage.QC, ProductionStage.APPROVED -> floor.inspection
+    ProductionStage.PACKING, ProductionStage.READY_TO_SHIP -> floor.staging
+    ProductionStage.SHIPPED -> floor.shipping
+    ProductionStage.RAW, ProductionStage.WAITING_MACHINE -> floor.stock
+    ProductionStage.SCRAP -> floor.staging
+    null -> floor.entry
 }
 
 private fun DrawScope.drawOwnerCargoCrate(ownerAt: Offset, halfW: Float) {
@@ -1300,7 +1330,8 @@ private fun StudioWorkerManagementDialog(
         title = { Text(employee.name, fontWeight = FontWeight.Black, color = Steel100) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("${employee.specialty} • Nv.${employee.skillLevel} • ${employee.trait}", color = Steel400)
+                Text("${roleLabelV28(employee.specialty)} • Grau ${employee.jobGrade} • Nv.${employee.skillLevel} • ${employee.trait}", color = Steel400)
+                Text("Setor-base: ${roleAreaV28(employee.specialty)}", color = ElectricBlue, fontWeight = FontWeight.Bold)
                 Text("Atividade: ${worker?.activity?.label ?: "fora da cena"}", color = if (worker?.activity == WorkerActivity.PHONE) DangerRed else ProductionGreen, fontWeight = FontWeight.Bold)
                 Text("Posto: $machineName", color = Steel100)
                 Text("Salário mensal: ${GameStore.money(employee.salaryCents)}", color = SafetyAmber, fontWeight = FontWeight.Bold)
@@ -1310,6 +1341,7 @@ private fun StudioWorkerManagementDialog(
                     OutlinedButton(onClick = { store.restEmployee(employee.id); onDismiss() }, modifier = Modifier.weight(1f)) { Text("Copa") }
                     OutlinedButton(onClick = { store.assignEmployeeNext(employee.id); onDismiss() }, modifier = Modifier.weight(1f)) { Text("Trocar posto") }
                 }
+                EmployeeCareerActionsV28(store, employee)
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },

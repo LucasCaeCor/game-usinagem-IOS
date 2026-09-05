@@ -105,6 +105,70 @@ service cloud.firestore {
     }
 
     // Segurança padrão: qualquer coleção que não tenha regra explícita fica bloqueada.
+    // V28_SOCIAL_RULES_BEGIN
+    // Cole/mescle este bloco dentro de: service cloud.firestore { match /databases/{database}/documents { ... } }
+    // Ele NÃO substitui regras existentes de cloud_saves, player_accounts, public_factories ou helps.
+
+    match /character_offers/{ownerId} {
+      allow read: if request.auth != null;
+
+      allow create: if request.auth != null
+                    && request.auth.uid == ownerId
+                    && request.resource.data.ownerUid == ownerId;
+
+      allow update: if request.auth != null && (
+        (
+          request.auth.uid == ownerId
+          && request.resource.data.ownerUid == ownerId
+        )
+        ||
+        (
+          request.auth.uid != ownerId
+          && resource.data.ownerUid == ownerId
+          && request.resource.data.ownerUid == ownerId
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['leasedBy', 'leasedUntil'])
+          && request.resource.data.leasedBy == request.auth.uid
+          && resource.data.leasedUntil <= request.time
+          && request.resource.data.leasedUntil > request.time
+        )
+      );
+
+      allow delete: if request.auth != null && request.auth.uid == ownerId;
+    }
+
+    match /character_rentals/{rentalId} {
+      allow create: if request.auth != null
+                    && request.resource.data.renterUid == request.auth.uid
+                    && request.resource.data.ownerUid != request.auth.uid;
+
+      allow read: if request.auth != null && (
+        resource.data.renterUid == request.auth.uid ||
+        resource.data.ownerUid == request.auth.uid
+      );
+
+      // O proprietário do personagem contratado pode operar manualmente no vínculo ativo.
+      // Só estes quatro campos podem mudar e há cooldown mínimo de 10 minutos.
+      allow update: if request.auth != null
+                    && resource.data.ownerUid == request.auth.uid
+                    && resource.data.endsAt > request.time
+                    && resource.data.manualOps is int
+                    && resource.data.lastManualOpAt is timestamp
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['manualOps', 'lastManualMachineId', 'lastManualScore', 'lastManualOpAt'])
+                    && request.resource.data.manualOps == resource.data.manualOps + 1
+                    && request.resource.data.lastManualMachineId is string
+                    && request.resource.data.lastManualScore is int
+                    && request.resource.data.lastManualScore >= 0
+                    && request.resource.data.lastManualScore <= 100
+                    && request.resource.data.lastManualOpAt is timestamp
+                    && request.resource.data.lastManualOpAt > resource.data.lastManualOpAt
+                    && request.time > resource.data.lastManualOpAt + duration.value(10, 'm');
+
+      allow delete: if false;
+    }
+    // V28_SOCIAL_RULES_END
+
     match /{document=**} {
       allow read, write: if false;
     }

@@ -34,6 +34,7 @@ data class EmployeeSave(
     val legendaryCode: String? = null,
     val fatigue: Double = 0.0,
     val restingUntil: Long = 0L,
+    val jobGrade: Int = 1,
 )
 
 data class ContractSave(
@@ -240,4 +241,5 @@ data class GameSave(
     val lastMinigameAt: Long = 0L,
     val bestMinigameScore: Double = 0.0,
     val lastPayrollCycle: Long = -1L,
+    val autoCargoDelivery: Boolean = false,
 )
