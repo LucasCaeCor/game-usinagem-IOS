@@ -116,13 +116,6 @@ object GameSaveCodec {
                 it.target, it.progress, it.rewardCents, it.claimed,
             )
         }
-        row("DAILY4", save.dailyMissions.day)
-        save.dailyMissions.missions.forEach {
-            row(
-                "DM4", it.id, it.title, it.description, it.metric, it.target,
-                it.baseValue, it.rewardType, it.rewardValue, it.rewardItemId, it.claimed,
-            )
-        }
         row(
             "PROFILE3",
             save.profile.name,
@@ -189,8 +182,6 @@ object GameSaveCodec {
         var career = CareerSave()
 
         val legendaryMissions = mutableListOf<LegendaryMissionSave>()
-        var dailyMissionDay = -1L
-        val dailyMissions = mutableListOf<DailyMissionSave>()
         val machines = mutableListOf<MachineSave>()
         val employees = mutableListOf<EmployeeSave>()
         val contracts = mutableListOf<ContractSave>()
@@ -358,19 +349,6 @@ object GameSaveCodec {
                     accessory = normalizeAccessory(p.text(8)),
                     onboardingComplete = true,
                 )
-                "DAILY4" -> dailyMissionDay = p.long(1, -1L)
-                "DM4" -> dailyMissions += DailyMissionSave(
-                    id = p.text(1),
-                    title = p.text(2),
-                    description = p.text(3),
-                    metric = p.text(4),
-                    target = p.long(5, 1L).coerceAtLeast(1L),
-                    baseValue = p.long(6),
-                    rewardType = p.text(7, "MONEY"),
-                    rewardValue = p.long(8),
-                    rewardItemId = p.text(9),
-                    claimed = p.bool(10),
-                )
                 "PROFILE3" -> profile = PlayerProfileSave(
                     name = p.text(1, "Dono da Oficina"),
                     gender = p.text(2, "MALE"),
@@ -493,7 +471,6 @@ object GameSaveCodec {
             finances = finances,
             goals = goals,
             legendaryMissions = legendaryMissions,
-            dailyMissions = DailyMissionStateSave(dailyMissionDay, dailyMissions),
             career = career,
             expansion = expansion,
             profile = profile,

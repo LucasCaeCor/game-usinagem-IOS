@@ -130,24 +130,6 @@ data class LegendaryMissionSave(
     val claimed: Boolean = false,
 )
 
-data class DailyMissionSave(
-    val id: String,
-    val title: String,
-    val description: String,
-    val metric: String,
-    val target: Long,
-    val baseValue: Long,
-    val rewardType: String,
-    val rewardValue: Long,
-    val rewardItemId: String = "",
-    val claimed: Boolean = false,
-)
-
-data class DailyMissionStateSave(
-    val day: Long = -1L,
-    val missions: List<DailyMissionSave> = emptyList(),
-)
-
 data class OwnerWorkBatchSave(
     val id: String,
     val machineId: String,
@@ -224,7 +206,6 @@ data class GameSave(
     val finances: List<FinanceSave> = emptyList(),
     val goals: List<GoalSave> = emptyList(),
     val legendaryMissions: List<LegendaryMissionSave> = emptyList(),
-    val dailyMissions: DailyMissionStateSave = DailyMissionStateSave(),
     val career: CareerSave = CareerSave(),
     val expansion: ExpansionSave = ExpansionSave(),
     val profile: PlayerProfileSave = PlayerProfileSave(),

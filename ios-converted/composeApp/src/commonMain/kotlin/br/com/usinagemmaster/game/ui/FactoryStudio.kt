@@ -61,7 +61,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-private const val FACTORY_STUDIO_V27 = "factory_studio_v27"
+private const val FACTORY_STUDIO_V27 = "factory_studio_v27_2"
 
 @Composable
 fun FactoryStudio(
@@ -218,23 +218,6 @@ fun FactoryStudio(
                 Canvas(
                     modifier = Modifier
                         .matchParentSize()
-                        .pointerInput(Unit) {
-                            // Um dedo continua livre para o scroll vertical. A câmera só captura 2+ dedos.
-                            awaitEachGesture {
-                                awaitFirstDown(requireUnconsumed = false)
-                                var event = awaitPointerEvent()
-                                while (event.changes.any { it.pressed }) {
-                                    if (event.changes.count { it.pressed } >= 2) {
-                                        val zoomChange = event.calculateZoom()
-                                        val panChange = event.calculatePan()
-                                        zoom = (zoom * zoomChange).coerceIn(.78f, 3.25f)
-                                        pan = studioClampPan(pan + panChange, zoom)
-                                        event.changes.forEach { it.consume() }
-                                    }
-                                    event = awaitPointerEvent()
-                                }
-                            }
-                        }
                         .pointerInput(
                             store.state.machines,
                             store.factoryFrame.workers,
@@ -242,98 +225,128 @@ fun FactoryStudio(
                             zoom,
                             pan,
                         ) {
-                            detectTapGestures(
-                                onDoubleTap = {
-                                    zoom = if (zoom < 1.75f) 2.05f else 1f
-                                    pan = Offset.Zero
-                                },
-                                onTap = { tap ->
-                                    val width = size.width.toFloat()
-                                    val height = size.height.toFloat()
-                                    val base = studioBaseTile(width, height) * zoom
-                                    fun point(p: FloorPoint) = studioProject(p, width, height, zoom, pan)
-                                    fun distance(a: Offset, b: Offset) = studioDistance(a, b)
-                                    val stage = studioStage(batch)
-                                    val stationRadius = (base * .92f).coerceAtLeast(26f)
+                            awaitEachGesture {
+                                val first = awaitFirstDown(requireUnconsumed = false)
+                                val startTap = first.position
+                                var latest = startTap
+                                var moved = false
+                                var multiTouch = false
 
-                                    val q = point(FactoryFloor.INSPECTION.point())
-                                    if (distance(tap, q) <= stationRadius && batch != null) {
-                                        when (stage) {
-                                            ProductionStage.MACHINED -> {
-                                                store.moveOwnerBatchToQuality()
-                                                GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled)
-                                                GameFeedback.haptic(hapticsEnabled)
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    event.changes.firstOrNull()?.let { latest = it.position }
+                                    val pressed = event.changes.filter { it.pressed }
+
+                                    if (pressed.size >= 2) {
+                                        multiTouch = true
+                                        val zoomChange = event.calculateZoom()
+                                        val panChange = event.calculatePan()
+                                        zoom = (zoom * zoomChange).coerceIn(.78f, 3.25f)
+                                        pan = studioClampPan(pan + panChange, zoom)
+                                        event.changes.forEach { it.consume() }
+                                    } else if (!multiTouch && pressed.size == 1) {
+                                        latest = pressed.first().position
+                                        if (studioDistance(startTap, latest) > viewConfiguration.touchSlop) moved = true
+                                    }
+
+                                    if (event.changes.none { it.pressed }) {
+                                        if (!multiTouch && !moved) {
+                                            val tap = latest
+                                            val width = size.width.toFloat()
+                                            val height = size.height.toFloat()
+                                            val base = studioBaseTile(width, height) * zoom
+                                            fun point(p: FloorPoint) = studioProject(p, width, height, zoom, pan)
+                                            fun distance(a: Offset, b: Offset) = studioDistance(a, b)
+                                            val stage = studioStage(batch)
+                                            val stationRadius = (base * 1.25f).coerceAtLeast(34f)
+
+                                            val q = point(FactoryFloor.INSPECTION.point())
+                                            if (distance(tap, q) <= stationRadius && batch != null) {
+                                                when (stage) {
+                                                    ProductionStage.MACHINED -> {
+                                                        store.moveOwnerBatchToQuality()
+                                                        GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled)
+                                                        GameFeedback.haptic(hapticsEnabled)
+                                                    }
+                                                    ProductionStage.WAITING_QC, ProductionStage.QC -> {
+                                                        showQuality = true
+                                                        GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled)
+                                                    }
+                                                    else -> Unit
+                                                }
+                                            } else {
+                                                val prep = point(FactoryFloor.STAGING.point())
+                                                val shipping = point(FactoryFloor.SHIPPING.point())
+                                                when {
+                                                    distance(tap, prep) <= stationRadius -> {
+                                                        if (stage == ProductionStage.APPROVED) {
+                                                            store.packOwnerBatch()
+                                                            GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled)
+                                                        } else if (store.pendingCargo.isNotEmpty() && !frame.owner.busy) {
+                                                            store.startCargoDelivery()
+                                                            GameFeedback.play(GameSoundEffect.MACHINE_START, soundEnabled)
+                                                        }
+                                                    }
+                                                    distance(tap, shipping) <= stationRadius && batch != null -> {
+                                                        if (stage == ProductionStage.READY_TO_SHIP) {
+                                                            store.shipOwnerBatch()
+                                                            GameFeedback.play(GameSoundEffect.REWARD, soundEnabled)
+                                                            GameFeedback.haptic(hapticsEnabled)
+                                                        }
+                                                    }
+                                                    else -> {
+                                                        val touchedWorker = store.factoryFrame.workers
+                                                            .asSequence()
+                                                            .filter { it.activity != WorkerActivity.OFF_SHIFT }
+                                                            .map { worker ->
+                                                                val visualCenter = point(worker.position) + Offset(0f, -base * .78f)
+                                                                worker to distance(tap, visualCenter)
+                                                            }
+                                                            .minByOrNull { it.second }
+                                                            ?.takeIf { it.second <= (base * 1.48f).coerceAtLeast(38f) }
+                                                            ?.first
+
+                                                        if (touchedWorker != null) {
+                                                            selectedWorkerId = touchedWorker.id
+                                                            selectedMachineId = null
+                                                            GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled)
+                                                            GameFeedback.haptic(hapticsEnabled)
+                                                            if (
+                                                                touchedWorker.activity == WorkerActivity.PHONE &&
+                                                                reprimandTargetId == null &&
+                                                                !frame.owner.busy
+                                                            ) reprimandTargetId = touchedWorker.id
+                                                        } else {
+                                                            val touchedMachine = store.state.machines
+                                                                .filter { it.installed }
+                                                                .map { machine ->
+                                                                    val input = FactoryMachineInput(machine.id, machine.gridX, machine.gridY, machine.installed, machine.condition)
+                                                                    val visualCenter = point(FactoryFloor.bay(input).point()) + Offset(0f, -base * .42f)
+                                                                    machine to distance(tap, visualCenter)
+                                                                }
+                                                                .minByOrNull { it.second }
+                                                                ?.takeIf { it.second <= (base * 1.62f).coerceAtLeast(42f) }
+                                                                ?.first
+
+                                                            if (touchedMachine != null) {
+                                                                selectedMachineId = touchedMachine.id
+                                                                selectedWorkerId = null
+                                                                machineDialogId = touchedMachine.id
+                                                                GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled)
+                                                                GameFeedback.haptic(hapticsEnabled)
+                                                            } else {
+                                                                selectedMachineId = null
+                                                                selectedWorkerId = null
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
-                                            ProductionStage.WAITING_QC, ProductionStage.QC -> {
-                                                showQuality = true
-                                                GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled)
-                                            }
-                                            else -> Unit
                                         }
-                                        return@detectTapGestures
+                                        break
                                     }
-                                    val p = point(FactoryFloor.STAGING.point())
-                                    if (distance(tap, p) <= stationRadius) {
-                                        if (stage == ProductionStage.APPROVED) {
-                                            store.packOwnerBatch()
-                                            GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled)
-                                        } else if (store.pendingCargo.isNotEmpty() && !frame.owner.busy) {
-                                            store.startCargoDelivery()
-                                            GameFeedback.play(GameSoundEffect.MACHINE_START, soundEnabled)
-                                        }
-                                        return@detectTapGestures
-                                    }
-                                    val e = point(FactoryFloor.SHIPPING.point())
-                                    if (distance(tap, e) <= stationRadius && batch != null) {
-                                        if (stage == ProductionStage.READY_TO_SHIP) {
-                                            store.shipOwnerBatch()
-                                            GameFeedback.play(GameSoundEffect.REWARD, soundEnabled)
-                                            GameFeedback.haptic(hapticsEnabled)
-                                        }
-                                        return@detectTapGestures
-                                    }
-
-                                    val workerScale = (base / 18f).coerceIn(.45f, 1.25f)
-                                    val touchedWorker = store.factoryFrame.workers
-                                        .asSequence()
-                                        .filter { it.activity != WorkerActivity.OFF_SHIFT }
-                                        .map { it to distance(tap, point(it.position) + Offset(0f, -24f * workerScale)) }
-                                        .minByOrNull { it.second }
-                                        ?.takeIf { it.second <= (28f * workerScale).coerceAtLeast(22f) }
-                                        ?.first
-                                    if (touchedWorker != null) {
-                                        selectedWorkerId = touchedWorker.id
-                                        selectedMachineId = null
-                                        if (
-                                            touchedWorker.activity == WorkerActivity.PHONE &&
-                                            reprimandTargetId == null &&
-                                            !frame.owner.busy
-                                        ) {
-                                            reprimandTargetId = touchedWorker.id
-                                        }
-                                        return@detectTapGestures
-                                    }
-
-                                    val touchedMachine = store.state.machines
-                                        .filter { it.installed }
-                                        .map { machine ->
-                                            val input = FactoryMachineInput(machine.id, machine.gridX, machine.gridY, machine.installed, machine.condition)
-                                            machine to distance(tap, point(FactoryFloor.bay(input).point()))
-                                        }
-                                        .minByOrNull { it.second }
-                                        ?.takeIf { it.second <= (base * 1.05f).coerceAtLeast(28f) }
-                                        ?.first
-                                    if (touchedMachine != null) {
-                                        selectedMachineId = touchedMachine.id
-                                        selectedWorkerId = null
-                                        machineDialogId = touchedMachine.id
-                                        GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled)
-                                    } else {
-                                        selectedMachineId = null
-                                        selectedWorkerId = null
-                                    }
-                                },
-                            )
+                                }
+                            }
                         },
                 ) {
                     drawFactoryStudioScene(
@@ -555,6 +568,12 @@ private fun DrawScope.drawFactoryStudioScene(
     drawZone(project(FactoryFloor.STAGING.point()), halfW, if (store.pendingCargo.isNotEmpty()) SafetyAmber else Color(0xFF65552F))
     drawZone(project(FactoryFloor.BREAK_ROOM.point()), halfW, Color(0xFF376548))
     drawZone(project(FactoryFloor.SHIPPING.point()), halfW, ElectricBlue)
+    drawStationMarkerV27_2(project(FactoryFloor.STOCK.point()), halfW, "A", "ALMOX", textMeasurer)
+    drawStationMarkerV27_2(project(FactoryFloor.TOOLS.point()), halfW, "F", "FERR.", textMeasurer)
+    drawStationMarkerV27_2(project(FactoryFloor.INSPECTION.point()), halfW, "Q", "QUALIDADE", textMeasurer)
+    drawStationMarkerV27_2(project(FactoryFloor.STAGING.point()), halfW, "P", "PREPARAÇÃO", textMeasurer)
+    drawStationMarkerV27_2(project(FactoryFloor.BREAK_ROOM.point()), halfW, "C", "COPA", textMeasurer)
+    drawStationMarkerV27_2(project(FactoryFloor.SHIPPING.point()), halfW, "E", "EXPEDIÇÃO", textMeasurer)
 
     // Máquinas desenhadas por estado e tipo.
     store.state.machines.forEach { machine ->
@@ -665,19 +684,33 @@ private fun DrawScope.drawFactoryStudioScene(
     )
     if (ownerCarrying) drawOwnerCargoCrate(ownerAt, halfW)
 
-    val speechWorker = selectedWorkerId?.let { id -> frame.workers.firstOrNull { it.id == id } }
-        ?: frame.workers.firstOrNull { worker ->
-            val employee = store.state.employees.firstOrNull { it.id == worker.id }
-            employee?.legendaryCode != null && phase in .12f..0.42f
+    // Falas V27.2: cada operador possui relógio e frase próprios. No máximo 2 balões simultâneos.
+    val nowSpeech = currentTimeMillis()
+    val speechDuration = (store.state.uiSettings.legendarySpeechSeconds.coerceIn(4, 8) * 1000L)
+    val speechInterval = (speechDuration + 11_000L).coerceAtLeast(15_000L)
+    val speaking = frame.workers
+        .filter { it.activity != WorkerActivity.OFF_SHIFT }
+        .mapNotNull { worker ->
+            val employee = store.state.employees.firstOrNull { it.id == worker.id } ?: return@mapNotNull null
+            val rawSeed = employee.id.hashCode().toLong()
+            val seed = if (rawSeed < 0L) -rawSeed else rawSeed
+            val offset = seed % speechInterval
+            val local = (nowSpeech + offset) % speechInterval
+            if (local >= speechDuration) return@mapNotNull null
+            val phraseIndex = ((nowSpeech + offset) / speechInterval).toInt() + (seed % 17L).toInt()
+            val working = worker.activity in setOf(WorkerActivity.WORKING, WorkerActivity.SETTING_UP, WorkerActivity.CARRYING_PART, WorkerActivity.INSPECTING)
+            val quote = LegendaryEmployeeCatalog.quote(employee.legendaryCode, working, phraseIndex)
+                ?: studioWorkerQuoteV27(employee, worker.activity, phraseIndex)
+            Triple(worker, quote, local)
         }
-    if (speechWorker != null) {
-        val employee = store.state.employees.firstOrNull { it.id == speechWorker.id }
-        if (employee != null) {
-            val working = speechWorker.activity == WorkerActivity.WORKING || speechWorker.activity == WorkerActivity.SETTING_UP || speechWorker.activity == WorkerActivity.CARRYING_PART
-            val legendary = LegendaryEmployeeCatalog.quote(employee.legendaryCode, working, ((phase * 100f).toInt() + employee.id.hashCode()))
-            val quote = legendary ?: studioWorkerQuoteV27(employee, speechWorker.activity)
-            drawSpeechBubbleV27(project(speechWorker.position) + Offset(halfW * .35f, -halfW * 2.7f), quote, textMeasurer, halfW)
-        }
+        .sortedWith(compareBy<Triple<FactoryWorkerFrame, String, Long>> { it.third }.thenBy { it.first.id })
+        .take(2)
+
+    speaking.forEachIndexed { index, item ->
+        val worker = item.first
+        val quote = item.second
+        val side = if (index % 2 == 0) .34f else -.34f
+        drawSpeechBubbleV27(project(worker.position) + Offset(halfW * side, -halfW * 2.7f), quote, textMeasurer, halfW)
     }
 
     // Exaustores/luminárias.
@@ -706,16 +739,22 @@ private fun DrawScope.drawFactoryRunningEffectsV27(at: Offset, scale: Float, typ
     }
 }
 
-private fun studioWorkerQuoteV27(employee: EmployeeSave, activity: WorkerActivity): String = when (activity) {
-    WorkerActivity.PHONE -> "Tá bom, chefe... guardando o celular."
-    WorkerActivity.BREAK -> "Café rápido e volto pro posto."
-    WorkerActivity.FETCHING_MATERIAL -> "Buscando material. Não vou deixar a máquina esperando."
-    WorkerActivity.FETCHING_TOOLS -> "Pegando ferramenta pro próximo setup."
-    WorkerActivity.SETTING_UP -> "Setup quase pronto."
-    WorkerActivity.INSPECTING -> "Conferindo medida e acabamento."
-    WorkerActivity.CARRYING_PART -> "Levando o lote pra próxima etapa."
-    WorkerActivity.WORKING -> if (employee.specialty.contains("CNC", true)) "Offset conferido. Programa rodando." else "Cavaco saindo bonito hoje."
-    else -> "Pronto pro próximo serviço."
+private fun studioWorkerQuoteV27(employee: EmployeeSave, activity: WorkerActivity, index: Int): String {
+    val choices = when (activity) {
+        WorkerActivity.PHONE -> listOf("Tá bom, chefe... guardando o celular.", "Já voltei pro posto.")
+        WorkerActivity.BREAK -> listOf("Café rápido e volto pro posto.", "Só recuperando o fôlego.")
+        WorkerActivity.FETCHING_MATERIAL -> listOf("Buscando material. Não vou deixar a máquina esperando.", "Matéria-prima a caminho.")
+        WorkerActivity.FETCHING_TOOLS -> listOf("Pegando ferramenta pro próximo setup.", "Vou buscar a ferramenta certa.")
+        WorkerActivity.SETTING_UP -> listOf("Setup quase pronto.", "Alinhamento conferido. Falta pouco.")
+        WorkerActivity.INSPECTING -> listOf("Conferindo medida e acabamento.", "Vou medir de novo antes de liberar.")
+        WorkerActivity.CARRYING_PART -> listOf("Levando o lote pra próxima etapa.", "Peças indo para o próximo setor.")
+        WorkerActivity.WORKING -> if (employee.specialty.contains("CNC", true))
+            listOf("Offset conferido. Programa rodando.", "CNC estável. Vou manter o ritmo.")
+        else listOf("Cavaco saindo bonito hoje.", "Máquina redonda. Produção seguindo.")
+        else -> listOf("Pronto pro próximo serviço.", "Pode mandar a próxima ordem.")
+    }
+    val safe = if (index == Int.MIN_VALUE) 0 else kotlin.math.abs(index)
+    return choices[safe % choices.size]
 }
 
 private fun DrawScope.drawSpeechBubbleV27(at: Offset, text: String, measurer: androidx.compose.ui.text.TextMeasurer, scale: Float) {
@@ -729,6 +768,23 @@ private fun DrawScope.drawSpeechBubbleV27(at: Offset, text: String, measurer: an
     drawRoundRect(Steel950.copy(alpha=.95f), Offset(left,top), Size(w,h), CornerRadius(scale*.28f))
     drawRoundRect(ElectricBlue.copy(alpha=.72f), Offset(left,top), Size(w,h), CornerRadius(scale*.28f), style=Stroke((scale*.055f).coerceAtLeast(1f)))
     drawText(layout, topLeft = Offset(left+pad, top+pad*.7f))
+}
+
+private fun DrawScope.drawStationMarkerV27_2(
+    at: Offset,
+    scale: Float,
+    letter: String,
+    caption: String,
+    measurer: androidx.compose.ui.text.TextMeasurer,
+) {
+    val center = at + Offset(0f, -scale * .78f)
+    val radius = (scale * .34f).coerceAtLeast(10f)
+    drawCircle(Steel950.copy(alpha = .96f), radius, center)
+    drawCircle(Color.White.copy(alpha = .72f), radius, center, style = Stroke((scale * .055f).coerceAtLeast(1.2f)))
+    val letterLayout = measurer.measure(letter, style = TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black))
+    drawText(letterLayout, topLeft = center - Offset(letterLayout.size.width / 2f, letterLayout.size.height / 2f))
+    val captionLayout = measurer.measure(caption, style = TextStyle(color = Color.White.copy(alpha=.88f), fontSize = 7.sp, fontWeight = FontWeight.Bold))
+    drawText(captionLayout, topLeft = Offset(center.x - captionLayout.size.width / 2f, center.y + radius + scale * .08f))
 }
 
 private fun DrawScope.drawZone(at: Offset, scale: Float, color: Color) {

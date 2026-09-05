@@ -1,6 +1,7 @@
 package br.com.usinagemmaster.game.ui
 
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -18,6 +19,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -35,138 +37,89 @@ fun AndroidV24MainMenu(
     onCommunity: () -> Unit,
     onSettings: () -> Unit,
 ) {
-    val transition = rememberInfiniteTransition(label = "menu_industrial")
-    val phase by transition.animateFloat(
-        0f, 1f,
-        infiniteRepeatable(tween(9_000, easing = LinearEasing), RepeatMode.Restart),
-        label = "menu_phase",
-    )
-    val pulse by transition.animateFloat(
-        .35f, 1f,
-        infiniteRepeatable(tween(1_500), RepeatMode.Reverse),
-        label = "menu_pulse",
-    )
+    val transition = rememberInfiniteTransition(label = "landing_v27")
+    val phase by transition.animateFloat(0f, 1f, infiniteRepeatable(tween(8_000, easing = LinearEasing), RepeatMode.Restart), label = "landing_phase")
+    val pulse by transition.animateFloat(.35f, 1f, infiniteRepeatable(tween(1_700), RepeatMode.Reverse), label = "landing_pulse")
+    val production = store.production
+    val live = store.factoryFrame.open
 
     Box(
-        Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(Steel980, Steel950, Color(0xFF111A19))
-                )
-            )
-            .statusBarsPadding()
-            .navigationBarsPadding(),
+        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Steel980, Steel950, Color(0xFF101B1D)))).statusBarsPadding().navigationBarsPadding()
     ) {
         Canvas(Modifier.fillMaxSize()) {
-            val grid = 42f
-            var x = 0f
-            while (x <= size.width) {
-                drawLine(Steel700.copy(alpha = .12f), Offset(x, 0f), Offset(x, size.height), 1f)
-                x += grid
-            }
+            val spacing = 38f
+            var x = -spacing + (phase * spacing)
+            while (x < size.width + spacing) { drawLine(Steel700.copy(alpha=.09f), Offset(x,0f), Offset(x,size.height),1f); x += spacing }
             var y = 0f
-            while (y <= size.height) {
-                drawLine(Steel700.copy(alpha = .12f), Offset(0f, y), Offset(size.width, y), 1f)
-                y += grid
-            }
+            while (y < size.height) { drawLine(Steel700.copy(alpha=.07f), Offset(0f,y), Offset(size.width,y),1f); y += spacing }
+            drawCircle(IndustrialAmber.copy(alpha=.035f + pulse*.05f), size.width*.52f, Offset(size.width*.72f,size.height*.27f))
+            drawCircle(ElectricBlue.copy(alpha=.025f + pulse*.035f), size.width*.38f, Offset(size.width*.12f,size.height*.73f))
+            drawRect(Color.Black.copy(alpha=.34f), Offset(0f,size.height*.67f), Size(size.width,size.height*.33f))
+            drawLine(IndustrialAmber.copy(alpha=.55f), Offset(0f,size.height*.80f), Offset(size.width,size.height*.80f),3f)
+        }
 
-            val glowX = size.width * (.12f + phase * .76f)
-            drawCircle(
-                IndustrialAmber.copy(alpha = .05f + .07f * pulse),
-                radius = size.width * .46f,
-                center = Offset(glowX, size.height * .28f),
-            )
-
-            // Silhuetas de máquinas no fundo, como o menu Android.
-            repeat(4) { index ->
-                val left = size.width * (.06f + index * .245f)
-                val top = size.height * (.55f + (index % 2) * .025f)
-                drawRoundRect(
-                    color = Steel800.copy(alpha = .65f),
-                    topLeft = Offset(left, top),
-                    size = Size(size.width * .19f, size.height * .12f),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(14f),
-                )
-                drawRect(
-                    color = IndustrialAmber.copy(alpha = .25f + pulse * .15f),
-                    topLeft = Offset(left + size.width * .025f, top + size.height * .024f),
-                    size = Size(size.width * .045f, size.height * .012f),
-                )
+        Row(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom=20.dp, start=6.dp, end=6.dp).graphicsLayer(alpha=.48f),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            val machines = store.state.machines.take(3)
+            if (machines.isEmpty()) {
+                MachineArtworkV27("Torno Mecânico", machineType="MECHANICAL_LATHE", modifier=Modifier.width(112.dp).height(80.dp))
+                MachineArtworkV27("Centro CNC", machineType="CNC_MACHINING_CENTER", modifier=Modifier.width(112.dp).height(80.dp))
+            } else machines.forEach { machine ->
+                val name=MachineCatalog.byType(machine.machineType)?.name ?: machine.machineType
+                MachineArtworkV27(name,machineType=machine.machineType,modifier=Modifier.width(108.dp).height(78.dp))
             }
+        }
+
+        // Operadores ao fundo: a landing já mostra que a fábrica está viva.
+        Canvas(Modifier.align(Alignment.BottomEnd).padding(bottom=64.dp,end=20.dp).size(118.dp,170.dp).graphicsLayer(alpha=.72f)) {
+            drawPlayerAvatarFigure(Offset(size.width*.32f,size.height*.93f),store.state.profile,size.minDimension/88f,phase,true,false)
+            val employee=store.state.employees.firstOrNull()
+            if(employee!=null) drawPlayerAvatarFigure(Offset(size.width*.72f,size.height*.93f), employeeAvatarForLandingV27(employee), size.minDimension/96f, (phase+.32f)%1f, true, false)
         }
 
         Column(
-            Modifier
-                .fillMaxSize()
-                .padding(horizontal = 22.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.Center,
+            Modifier.fillMaxSize().padding(horizontal=20.dp,vertical=16.dp),
+            verticalArrangement=Arrangement.Center,
         ) {
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = IndustrialAmber.copy(alpha = .12f),
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp, IndustrialAmber.copy(alpha = .35f)
-                ),
-            ) {
-                Text(
-                    "EDIÇÃO FINAL • 1.0",
-                    Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Black,
-                    color = IndustrialAmber,
-                )
+            Surface(shape=RoundedCornerShape(999.dp),color=(if(live)ProductionGreen else SafetyAmber).copy(alpha=.12f),border=BorderStroke(1.dp,(if(live)ProductionGreen else SafetyAmber).copy(alpha=.42f))) {
+                Text(if(live)"● FÁBRICA ONLINE" else "● FORA DO TURNO",Modifier.padding(horizontal=11.dp,vertical=5.dp),style=MaterialTheme.typography.labelMedium,fontWeight=FontWeight.Black,color=if(live)ProductionGreen else SafetyAmber)
             }
-            Spacer(Modifier.height(18.dp))
-            Text(
-                "USINAGEM\nMASTER",
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Black,
-                color = Steel100,
-            )
-            Text(
-                "IMPÉRIO DO AÇO",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Black,
-                color = IndustrialAmber,
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "Transforme uma oficina antiga em uma indústria CNC viva.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = Steel400,
-            )
-            Spacer(Modifier.height(26.dp))
-
-            Button(
-                onClick = onEnter,
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-            ) {
-                Text("ENTRAR NA FÁBRICA", fontWeight = FontWeight.Black)
+            Spacer(Modifier.height(14.dp))
+            Text("USINAGEM\nMASTER",style=MaterialTheme.typography.displaySmall,fontWeight=FontWeight.Black,color=Steel100)
+            Text("IMPÉRIO DO AÇO",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Black,color=IndustrialAmber)
+            Spacer(Modifier.height(8.dp))
+            Text("Sua fábrica respira: operadores trabalham, máquinas produzem e cada decisão aparece no chão de fábrica.",style=MaterialTheme.typography.bodyLarge,color=Steel200)
+            Spacer(Modifier.height(16.dp))
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
+                LandingStatV27("CAIXA",GameStore.money(store.state.company.cashCents),Modifier.weight(1f))
+                LandingStatV27("PRODUÇÃO","${oneV24(production.totalUnitsPer10Minutes)} pç",Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(14.dp))
+            Button(onClick={GameFeedback.play(GameSoundEffect.MACHINE_START,store.state.uiSettings.soundEnabled);GameFeedback.haptic(store.state.uiSettings.hapticsEnabled);onEnter()},modifier=Modifier.fillMaxWidth().height(58.dp)) { Text("ENTRAR NA FÁBRICA  →",fontWeight=FontWeight.Black) }
+            Spacer(Modifier.height(7.dp))
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
+                OutlinedButton(onClick=onProfile,modifier=Modifier.weight(1f)){Text("Personagem")}
+                OutlinedButton(onClick=onCommunity,modifier=Modifier.weight(1f)){Text("Comunidade")}
+                OutlinedButton(onClick=onSettings,modifier=Modifier.weight(1f)){Text("Ajustes")}
             }
             Spacer(Modifier.height(8.dp))
-
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onProfile, Modifier.weight(1f)) {
-                    Text("Personagem")
-                }
-                OutlinedButton(onClick = onCommunity, Modifier.weight(1f)) {
-                    Text("Comunidade")
-                }
-            }
-            OutlinedButton(onClick = onSettings, Modifier.fillMaxWidth()) {
-                Text("Configurações")
-            }
-
-            Spacer(Modifier.height(20.dp))
-            Text(
-                "${store.state.company.name} • N${store.state.company.companyLevel} • ${GameStore.money(store.state.company.cashCents)}",
-                style = MaterialTheme.typography.labelMedium,
-                color = Steel400,
-            )
+            Text("${store.state.company.name} • N${store.state.company.companyLevel} • ${store.state.machines.size} máquinas",style=MaterialTheme.typography.labelSmall,color=Steel400)
         }
     }
 }
+
+@Composable
+private fun LandingStatV27(label:String,value:String,modifier:Modifier=Modifier){
+    Surface(modifier,shape=RoundedCornerShape(14.dp),color=Steel900.copy(alpha=.90f),border=BorderStroke(1.dp,Steel700.copy(alpha=.75f))){Column(Modifier.padding(10.dp)){Text(label,style=MaterialTheme.typography.labelSmall,color=Steel400);Text(value,fontWeight=FontWeight.Black,color=Steel100,maxLines=1)}}
+}
+
+private fun employeeAvatarForLandingV27(employee:EmployeeSave):PlayerProfileSave = PlayerProfileSave(
+    name=employee.name,gender=if(employee.name.substringBefore(' ') in setOf("Luciana","Camila","Fernanda","Amanda","Juliana","Mariana","Beatriz","Renata"))"FEMALE" else "MALE",
+    skinStyle=when(employee.legendaryCode){"tatu_banhado"->"TATUZAO";"kendao"->"KENDAO_KIMONO";"magrao"->"MAGRAO";else->"WORKSHOP"},bodyType="STANDARD",skinTone="MEDIUM",hairStyle="SHORT",hairColor="DARK",uniformColor="NAVY",helmetColor="YELLOW",accessory="NONE",onboardingComplete=true,
+)
 
 @Composable
 fun AndroidWorkLifeHomeCard(store: GameStore) {
@@ -529,20 +482,13 @@ fun LegendaryEmployeesPanel(store: GameStore) {
 
     IndustrialCard(
         "Equipe lendária",
-        "${hiredCodes.size}/${LegendaryEmployeeCatalog.all.size} contratados • $available disponíveis"
+        "${hiredCodes.size}/${LegendaryEmployeeCatalog.all.size} coletados • $available elegíveis na roleta"
     ) {
-        Button(
-            onClick = store::hireLegendaryEmployee,
-            enabled = available > 0,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("CONTRATAR LENDÁRIO", fontWeight = FontWeight.Black)
-        }
+        StatePill("EXCLUSIVOS DA ROLETA", RoyalPurple)
         Text(
-            "A contratação sorteia um lendário liberado pelo nível e ainda não contratado. " +
-                "Cada um inicia uma missão própria.",
+            "Não existe contratação direta. Cada lendário entra na sua equipe somente quando é obtido na Roleta Industrial; duplicatas são bloqueadas e a missão própria nasce junto com o prêmio.",
             style = MaterialTheme.typography.bodySmall,
-            color = Steel400,
+            color = Steel200,
         )
     }
 
@@ -564,8 +510,8 @@ fun LegendaryEmployeesPanel(store: GameStore) {
                     Text(def.name, fontWeight = FontWeight.Black)
                     StatePill(
                         when {
-                            employee != null -> "CONTRATADO"
-                            unlocked -> "LIBERADO"
+                            employee != null -> "COLETADO"
+                            unlocked -> "ELEGÍVEL"
                             else -> "NÍVEL ${def.unlockLevel}"
                         },
                         when {
@@ -628,96 +574,7 @@ fun LegendaryEmployeesPanel(store: GameStore) {
 
 @Composable
 fun IndustrialCareerTree(store: GameStore) {
-    var branch by remember { mutableStateOf(IndustrialSkillBranch.OPERATION) }
-    val career = store.state.career
-    val available = career.availableSkillPoints()
-
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        HeroCard(
-            eyebrow = "CARREIRA INDUSTRIAL",
-            title = "$available ponto(s) disponíveis",
-            subtitle = "${career.totalManualOperations} operações manuais • ${career.shippedBatches} lotes expedidos",
-            accent = ElectricBlue,
-        ) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                CompactStat("Perfeitas", career.perfectOperations.toString(), Modifier.weight(1f))
-                CompactStat("Best", "${career.bestScore}%", Modifier.weight(1f))
-                CompactStat("Streak", career.operationStreak.toString(), Modifier.weight(1f))
-            }
-        }
-
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            IndustrialSkillBranch.values().forEach { b ->
-                FilterChip(
-                    selected = branch == b,
-                    onClick = { branch = b },
-                    label = { Text("${b.icon} ${b.label}") },
-                )
-            }
-        }
-
-        IndustrialSkillCatalog.all.filter { it.branch == branch }.forEach { skill ->
-            val owned = skill.id in career.unlockedSkills
-            val can = IndustrialSkillCatalog.canUnlock(
-                skill, career, store.state.company.companyLevel
-            )
-            ElevatedCard(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = if (owned) ElectricBlue.copy(alpha = .12f) else Steel900
-                ),
-                shape = RoundedCornerShape(18.dp),
-            ) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(skill.name, fontWeight = FontWeight.Black)
-                        StatePill(
-                            if (owned) "APRENDIDA" else "T${skill.tier} • ${skill.cost}pt",
-                            if (owned) ProductionGreen else ElectricBlue,
-                        )
-                    }
-                    Text(skill.description, style = MaterialTheme.typography.bodySmall, color = Steel400)
-                    if (skill.prerequisites.isNotEmpty()) {
-                        Text(
-                            "Pré: ${skill.prerequisites.joinToString()}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Steel400,
-                        )
-                    }
-                    if (!owned) {
-                        Button(
-                            onClick = { store.unlockIndustrialSkill(skill.id) },
-                            enabled = can,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text("Aprender • nível ${skill.minCompanyLevel}+")
-                        }
-                    }
-                }
-            }
-        }
-
-        if (career.hasSkill("diretor_industrial")) {
-            SectionTitle("Política de produção", "Diretor Industrial permite uma prioridade global")
-            ProductionPolicy.values().forEach { policy ->
-                FilterChip(
-                    selected = career.productionPolicy == policy.name,
-                    onClick = { store.setProductionPolicy(policy) },
-                    label = { Text(policy.label) },
-                )
-                if (career.productionPolicy == policy.name) {
-                    Text(policy.description, style = MaterialTheme.typography.bodySmall, color = Steel400)
-                }
-            }
-        }
-
-        if (career.achievements.isNotEmpty()) {
-            SectionTitle("Conquistas", career.achievements.joinToString(" • "))
-        }
-    }
+    IndustrialCareerStoryboardV27(store)
 }
 
 @Composable

@@ -24,10 +24,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import br.com.usinagemmaster.domain.catalog.MachineCatalog
 import br.com.usinagemmaster.game.domain.*
+import br.com.usinagemmaster.game.model.DailyMissionSave
 import br.com.usinagemmaster.game.model.EmployeeSave
 import br.com.usinagemmaster.game.model.MachineSave
 
-private const val VISUAL_V27 = "visual_experience_v27"
+private const val VISUAL_V27 = "visual_experience_v27_2"
 
 enum class DashboardVisualV27 { CASH, CARGO, PRODUCTION, TEAM, CONTRACT, RESEARCH, ROULETTE, FACTORY }
 
@@ -57,14 +58,14 @@ fun DashboardArtCardV27(
         shape = RoundedCornerShape(18.dp),
         border = BorderStroke(1.dp, Steel700.copy(alpha = .7f)),
     ) {
-        Row(Modifier.padding(11.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.padding(horizontal = 9.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             Surface(shape = RoundedCornerShape(14.dp), color = accent.copy(alpha = .12f), border = BorderStroke(1.dp, accent.copy(alpha = .28f))) {
-                Canvas(Modifier.size(52.dp).padding(8.dp)) { drawDashboardGlyphV27(kind, accent) }
+                Canvas(Modifier.size(36.dp).padding(6.dp)) { drawDashboardGlyphV27(kind, accent) }
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(title, style = MaterialTheme.typography.labelSmall, color = Steel400)
-                Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Steel100, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(note, style = MaterialTheme.typography.labelSmall, color = Steel400, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Black, color = Steel100, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(note, style = MaterialTheme.typography.labelSmall, color = Steel400, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -125,31 +126,85 @@ fun ShiftCommandDeckV27(store: GameStore, onPrecision: () -> Unit) {
     val focus = store.focusModeRemainingMillis
     val bonus = store.dailyBonusRemainingMillis
     val ticket = store.dailyTicketRemainingMillis
+    val profit = store.production.netPer10MinutesCents
     Card(
         colors = CardDefaults.elevatedCardColors(containerColor = Steel900, contentColor = Steel100),
         border = BorderStroke(1.dp, Steel700),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(16.dp),
     ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("CENTRAL DO TURNO", fontWeight = FontWeight.Black, color = Steel100)
-                    Text("Só o que exige decisão agora.", style = MaterialTheme.typography.bodySmall, color = Steel400)
+                    Text("TURNO", fontWeight = FontWeight.Black, color = Steel100)
+                    Text("Precisão, lucro e foco.", style = MaterialTheme.typography.labelSmall, color = Steel400)
                 }
                 StatePill(if (store.factoryFrame.open) "AO VIVO" else "FECHADO", if (store.factoryFrame.open) ProductionGreen else Steel500)
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                DashboardArtCardV27(DashboardVisualV27.RESEARCH, "Precisão", if (store.minigameAvailable) "Disponível" else formatV27Duration(store.minigameRemainingMillis), "Operação manual", Modifier.weight(1f), onPrecision)
-                DashboardArtCardV27(DashboardVisualV27.TEAM, "Modo foco", if (focus > 0L) formatV27Duration(focus) else "Disponível", if (focus > 0L) "Não acumula" else "8h sem celular", Modifier.weight(1f)) { store.buySnack(); GameFeedback.play(GameSoundEffect.UI_CLICK, store.state.uiSettings.soundEnabled) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TurnMetricCompactV27_2(
+                    icon = "◎",
+                    title = "Precisão",
+                    value = if (store.minigameAvailable) "Disponível" else formatV27Duration(store.minigameRemainingMillis),
+                    accent = ElectricBlue,
+                    modifier = Modifier.weight(1f),
+                    onClick = onPrecision,
+                )
+                TurnMetricCompactV27_2(
+                    icon = "R$",
+                    title = "Lucro",
+                    value = GameStore.money(profit),
+                    accent = ProductionGreen,
+                    modifier = Modifier.weight(1f),
+                )
+                TurnMetricCompactV27_2(
+                    icon = "◉",
+                    title = "Foco",
+                    value = if (focus > 0L) formatV27Duration(focus) else "Disponível",
+                    accent = if (focus > 0L) SafetyAmber else Color(0xFF72D7B0),
+                    modifier = Modifier.weight(1f),
+                    onClick = { if (focus == 0L) store.buySnack(); GameFeedback.play(GameSoundEffect.UI_CLICK, store.state.uiSettings.soundEnabled) },
+                )
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                OutlinedButton(onClick = { store.dailyBonus(); GameFeedback.play(GameSoundEffect.REWARD, store.state.uiSettings.soundEnabled) }, modifier = Modifier.weight(1f), enabled = bonus == 0L) {
-                    Text(if (bonus == 0L) "🎁 Bônus diário" else "🎁 ${formatV27Duration(bonus)}")
-                }
-                OutlinedButton(onClick = { store.claimDailyGachaTicket(); GameFeedback.play(GameSoundEffect.REWARD, store.state.uiSettings.soundEnabled) }, modifier = Modifier.weight(1f), enabled = ticket == 0L) {
-                    Text(if (ticket == 0L) "🎟 Ficha diária" else "🎟 ${formatV27Duration(ticket)}")
-                }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(
+                    onClick = { store.dailyBonus(); GameFeedback.play(GameSoundEffect.REWARD, store.state.uiSettings.soundEnabled) },
+                    modifier = Modifier.weight(1f).height(34.dp),
+                    enabled = bonus == 0L,
+                    contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp),
+                ) { Text(if (bonus == 0L) "🎁 Bônus" else formatV27Duration(bonus), style = MaterialTheme.typography.labelSmall) }
+                OutlinedButton(
+                    onClick = { store.claimDailyGachaTicket(); GameFeedback.play(GameSoundEffect.REWARD, store.state.uiSettings.soundEnabled) },
+                    modifier = Modifier.weight(1f).height(34.dp),
+                    enabled = ticket == 0L,
+                    contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp),
+                ) { Text(if (ticket == 0L) "🎟 Ficha" else formatV27Duration(ticket), style = MaterialTheme.typography.labelSmall) }
             }
+        }
+    }
+}
+
+@Composable
+private fun TurnMetricCompactV27_2(
+    icon: String,
+    title: String,
+    value: String,
+    accent: Color,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+) {
+    val click = if (onClick != null) Modifier.clickable { onClick() } else Modifier
+    Surface(
+        modifier = modifier.then(click).height(68.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = Steel950.copy(alpha = .72f),
+        border = BorderStroke(1.dp, accent.copy(alpha = .35f)),
+    ) {
+        Column(Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(icon, color = accent, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium)
+                Text(title, color = Steel400, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+            }
+            Text(value, color = Steel100, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -268,9 +323,14 @@ private fun machineShortV27(type:String):String { val u=type.uppercase(); return
 fun TechnicalListV27(store: GameStore) {
     var expanded by remember { mutableStateOf<String?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column { Text("LISTA TÉCNICA", fontWeight=FontWeight.Black,color=Steel100); Text("Disponíveis primeiro; depois melhor encaixe e experiência.",style=MaterialTheme.typography.bodySmall,color=Steel400) }
-            Button(onClick=store::autoDistributeOperators){ Text("Auto distribuir") }
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("LISTA TÉCNICA", fontWeight=FontWeight.Black,color=Steel100)
+            Text("Disponíveis primeiro; depois melhor encaixe e experiência.",style=MaterialTheme.typography.bodySmall,color=Steel400)
+            OutlinedButton(
+                onClick=store::autoDistributeOperators,
+                modifier=Modifier.height(34.dp).widthIn(max=148.dp),
+                contentPadding=PaddingValues(horizontal=9.dp,vertical=0.dp),
+            ){ Text("Auto distribuir", style=MaterialTheme.typography.labelSmall) }
         }
         store.state.machines.forEach { machine ->
             val def=MachineCatalog.byType(machine.machineType)
@@ -278,8 +338,16 @@ fun TechnicalListV27(store: GameStore) {
             MachineCatalogCardV27(def?.name ?: machine.machineType,machine.machineType,"BAIA ${machine.gridX+1}.${machine.gridY+1}",status="Operador: ${current?.name ?: "não atribuído"}") {
                 Text("Condição ${machine.condition/10}% • Nível ${machine.level}",style=MaterialTheme.typography.bodySmall,color=Steel400)
                 Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-                    Button(onClick={store.assignBestOperator(machine.id)},modifier=Modifier.weight(1f)){Text("Melhor operador")}
-                    OutlinedButton(onClick={expanded=if(expanded==machine.id)null else machine.id},modifier=Modifier.weight(1f)){Text(if(expanded==machine.id)"Fechar" else "Selecionar")}
+                    OutlinedButton(
+                        onClick={store.assignBestOperator(machine.id)},
+                        modifier=Modifier.height(34.dp),
+                        contentPadding=PaddingValues(horizontal=9.dp,vertical=0.dp),
+                    ){Text("Melhor operador",style=MaterialTheme.typography.labelSmall)}
+                    OutlinedButton(
+                        onClick={expanded=if(expanded==machine.id)null else machine.id},
+                        modifier=Modifier.height(34.dp),
+                        contentPadding=PaddingValues(horizontal=9.dp,vertical=0.dp),
+                    ){Text(if(expanded==machine.id)"Fechar" else "Selecionar",style=MaterialTheme.typography.labelSmall)}
                 }
             }
             if(expanded==machine.id){
@@ -305,6 +373,64 @@ fun TechnicalListV27(store: GameStore) {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun DailyMissionsV27_2(store: GameStore) {
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Card(
+            colors=CardDefaults.elevatedCardColors(containerColor=Steel850,contentColor=Steel100),
+            border=BorderStroke(1.dp,SafetyAmber.copy(alpha=.45f)),
+            shape=RoundedCornerShape(16.dp),
+        ) {
+            Row(Modifier.fillMaxWidth().padding(11.dp),verticalAlignment=Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("📋 MISSÕES DIÁRIAS",fontWeight=FontWeight.Black,color=Steel100)
+                    Text("3 objetivos reais • renovam em ${formatV27Duration(store.dailyMissionResetRemainingMillis)}",style=MaterialTheme.typography.bodySmall,color=Steel400)
+                }
+                StatePill("${store.dailyMissions.count { it.claimed }}/3",SafetyAmber)
+            }
+        }
+        store.dailyMissions.forEach { mission -> DailyMissionCardV27_2(store, mission) }
+    }
+}
+
+@Composable
+private fun DailyMissionCardV27_2(store: GameStore, mission: DailyMissionSave) {
+    val progress = store.dailyMissionProgress(mission)
+    val reward = when(mission.rewardType) {
+        "XP" -> "+${mission.rewardValue} XP personagem"
+        "TOOL" -> {
+            val name=GameProgression.tools.firstOrNull{it.id==mission.rewardItemId}?.name ?: mission.rewardItemId
+            "+${mission.rewardValue} $name"
+        }
+        else -> GameStore.money(mission.rewardValue)
+    }
+    Surface(
+        shape=RoundedCornerShape(14.dp),
+        color=Steel900,
+        border=BorderStroke(1.dp,if(mission.claimed)ProductionGreen.copy(alpha=.42f) else Steel700),
+    ) {
+        Column(Modifier.padding(10.dp),verticalArrangement=Arrangement.spacedBy(5.dp)) {
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(mission.title,fontWeight=FontWeight.Black,color=Steel100)
+                    Text(mission.description,style=MaterialTheme.typography.bodySmall,color=Steel400)
+                }
+                Text(reward,color=SafetyAmber,fontWeight=FontWeight.Bold,style=MaterialTheme.typography.labelSmall)
+            }
+            LinearProgressIndicator(progress=(progress.toFloat()/mission.target.coerceAtLeast(1L).toFloat()).coerceIn(0f,1f),modifier=Modifier.fillMaxWidth())
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
+                Text("$progress/${mission.target}",style=MaterialTheme.typography.labelSmall,color=Steel400)
+                OutlinedButton(
+                    onClick={store.claimDailyMission(mission.id);GameFeedback.play(GameSoundEffect.REWARD,store.state.uiSettings.soundEnabled)},
+                    enabled=!mission.claimed && progress>=mission.target,
+                    modifier=Modifier.height(32.dp),
+                    contentPadding=PaddingValues(horizontal=9.dp,vertical=0.dp),
+                ){Text(if(mission.claimed)"Coletada" else "Coletar",style=MaterialTheme.typography.labelSmall)}
             }
         }
     }
@@ -358,6 +484,7 @@ fun IndustrialCareerStoryboardV27(store: GameStore){
     val nodes=IndustrialSkillCatalog.all.filter{it.branch==branch}.sortedBy{it.tier}
     Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
         Card(colors=CardDefaults.elevatedCardColors(containerColor=Steel850,contentColor=Steel100),border=BorderStroke(1.dp,ElectricBlue.copy(alpha=.45f))){Column(Modifier.padding(13.dp)){Text("🧭 STORYBOARD INDUSTRIAL",fontWeight=FontWeight.Black,color=Steel100);Text("Escolha um caminho. Cada nó altera o gameplay e abre o próximo capítulo.",style=MaterialTheme.typography.bodySmall,color=Steel400);Text("${store.state.career.availableSkillPoints()} ponto(s) • ${store.state.career.unlockedSkills.size} aprendidas",color=SafetyAmber,fontWeight=FontWeight.Bold)}}
+        CareerHowToProgressV27_2(store)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)){IndustrialSkillBranch.entries.forEach{item->FilterChip(selected=branch==item,onClick={branch=item},label={Text("${item.icon} ${item.label}")})}}
         nodes.forEachIndexed{index,skill->
             val owned=skill.id in store.state.career.unlockedSkills
@@ -366,6 +493,34 @@ fun IndustrialCareerStoryboardV27(store: GameStore){
             Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)){
                 Column(horizontalAlignment=Alignment.CenterHorizontally){Surface(shape=RoundedCornerShape(999.dp),color=if(owned)ProductionGreen.copy(alpha=.18f) else Steel850,border=BorderStroke(2.dp,if(owned)ProductionGreen else if(can)SafetyAmber else Steel700)){Box(Modifier.size(48.dp),contentAlignment=Alignment.Center){Text(branch.icon)}};if(index<nodes.lastIndex)Canvas(Modifier.width(4.dp).height(26.dp)){drawLine(if(owned)ProductionGreen else Steel700,Offset(2f,0f),Offset(2f,size.height),3f)}}
                 Surface(Modifier.weight(1f),shape=RoundedCornerShape(16.dp),color=Steel900,border=BorderStroke(1.dp,if(owned)ProductionGreen.copy(alpha=.4f) else Steel700)){Column(Modifier.padding(11.dp)){Text("T${skill.tier} • ${skill.name}",fontWeight=FontWeight.Black,color=Steel100);Text(skill.description,style=MaterialTheme.typography.bodySmall,color=Steel400);Text("Custo ${skill.cost} • fábrica Nv.${skill.minCompanyLevel}",style=MaterialTheme.typography.labelSmall,color=SafetyAmber);if(missing.isNotEmpty())Text("Requer ${missing.mapNotNull(IndustrialSkillCatalog::byId).joinToString{it.name}}",style=MaterialTheme.typography.labelSmall,color=DangerRed);Button(onClick={store.unlockIndustrialSkill(skill.id)},enabled=can,modifier=Modifier.fillMaxWidth()){Text(if(owned)"APRENDIDA" else "APRENDER")}}}
+            }
+        }
+    }
+}
+
+@Composable
+private fun CareerHowToProgressV27_2(store: GameStore) {
+    val c=store.state.career
+    val bestMastery=c.masteryXp.maxOfOrNull { (type,xp) -> MachineMastery(type,xp).level } ?: 0
+    val milestones=listOf(
+        Triple("Operações manuais",c.totalManualOperations.toLong(),250L),
+        Triple("Peças perfeitas",c.perfectOperations.toLong(),20L),
+        Triple("Lotes aprovados",c.approvedBatches.toLong(),10L),
+        Triple("Lotes expedidos",c.shippedBatches.toLong(),20L),
+        Triple("Retrabalhos concluídos",c.reworkedBatches.toLong(),10L),
+        Triple("Maior maestria",bestMastery.toLong(),10L),
+    )
+    Surface(shape=RoundedCornerShape(16.dp),color=Steel900,border=BorderStroke(1.dp,Steel700)) {
+        Column(Modifier.padding(11.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+            Text("COMO EVOLUIR NA CARREIRA",fontWeight=FontWeight.Black,color=Steel100)
+            Text("Carreira usa pontos industriais, não o XP do personagem. Você ganha pontos ao colocar o dono para trabalhar e atingir marcos.",style=MaterialTheme.typography.bodySmall,color=Steel400)
+            Text("Marcos que dão pontos: 1/10/25/50/100/250 operações manuais; 5/20 perfeitas; 10 lotes aprovados; 20 expedidos; 10 retrabalhos; maestria Nv.10.",style=MaterialTheme.typography.bodySmall,color=ElectricBlue)
+            Text("XP do personagem é separado: contratos, minigames, aluguel e missões diárias aumentam o nível do personagem e a árvore do personagem.",style=MaterialTheme.typography.bodySmall,color=SafetyAmber)
+            milestones.forEach { (label,current,target) ->
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
+                    Text(label,style=MaterialTheme.typography.labelSmall,color=Steel400)
+                    Text("$current/$target",style=MaterialTheme.typography.labelSmall,color=Steel100,fontWeight=FontWeight.Bold)
+                }
             }
         }
     }

@@ -24,7 +24,7 @@ import br.com.usinagemmaster.game.model.*
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 
-private const val GAME_APP_V27 = "game_app_visual_v27"
+private const val GAME_APP_V27 = "game_app_visual_v27_2"
 
 private enum class Screen(val title: String, val short: String, val glyph: String) {
     HOME("Painel executivo", "Início", "⌂"),
@@ -246,14 +246,8 @@ private fun HomeScreen(
             }
         }
 
-        item {
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
-                DashboardArtCardV27(DashboardVisualV27.PRODUCTION,"Produção","${one(p.totalUnitsPer10Minutes)} pç","a cada 10 min",Modifier.weight(1f)){onOpen(Screen.FACTORY)}
-                DashboardArtCardV27(DashboardVisualV27.CASH,"Lucro / 10 min",GameStore.money(p.netPer10MinutesCents),"Qualidade ${p.averageQuality}%",Modifier.weight(1f)){onOpen(Screen.FINANCE)}
-            }
-        }
-
         item { ShiftCommandDeckV27(store) { onOpen(Screen.MINIGAME) } }
+        item { DailyMissionsV27_2(store) }
         item { AndroidDashboardProgress(store) }
 
         item { SectionTitle("Central de gestão", "Abra só o setor que precisa da sua atenção") }
@@ -583,6 +577,7 @@ private fun ProgressionScreen(store: GameStore) {
 
         when (tab) {
             "METAS" -> {
+                item { DailyMissionsV27_2(store) }
                 items(store.state.goals) { goal ->
                     val progress = store.goalProgress(goal)
                     IndustrialCard(goal.title, "$progress/${goal.target}") {

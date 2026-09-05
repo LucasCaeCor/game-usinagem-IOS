@@ -58,6 +58,7 @@ class GameStore {
         normalizeAndPersist()
         simulateOffline()
         ensureContracts()
+        ensureDailyMissions()
         refreshFactoryInput()
     }
 
@@ -120,6 +121,61 @@ class GameStore {
             return if (state.expansion.lastDailyTicketDay < today) 0L else ((today + 1L) * DAY_MILLIS - now).coerceAtLeast(0L)
         }
 
+
+    val dailyMissionResetRemainingMillis: Long
+        get() {
+            val now = currentTimeMillis()
+            val today = now / DAY_MILLIS
+            return ((today + 1L) * DAY_MILLIS - now).coerceAtLeast(0L)
+        }
+
+    val dailyMissions: List<DailyMissionSave>
+        get() = state.dailyMissions.missions
+
+    fun dailyMissionProgress(mission: DailyMissionSave): Long =
+        (dailyMetricValue(mission.metric) - mission.baseValue).coerceIn(0L, mission.target)
+
+    fun claimDailyMission(id: String) {
+        ensureDailyMissions()
+        val mission = state.dailyMissions.missions.firstOrNull { it.id == id }
+            ?: return notify("Missão diária não encontrada.")
+        if (mission.claimed) return notify("Recompensa diária já coletada.")
+        if (dailyMissionProgress(mission) < mission.target) return notify("Missão diária ainda não concluída.")
+
+        var company = state.company
+        var expansion = state.expansion
+        var finances = state.finances
+        val rewardText = when (mission.rewardType) {
+            "XP" -> {
+                expansion = expansion.copy(playerXp = expansion.playerXp + mission.rewardValue.coerceAtLeast(0L))
+                "+${mission.rewardValue} XP do personagem"
+            }
+            "TOOL" -> {
+                val quantity = mission.rewardValue.toInt().coerceAtLeast(1)
+                val itemId = mission.rewardItemId.ifBlank { "fresa_hss" }
+                expansion = expansion.copy(tools = expansion.tools + (itemId to ((expansion.tools[itemId] ?: 0) + quantity)))
+                val toolName = GameProgression.tools.firstOrNull { it.id == itemId }?.name ?: itemId
+                "+$quantity • $toolName"
+            }
+            else -> {
+                val money = mission.rewardValue.coerceAtLeast(0L)
+                company = company.copy(cashCents = company.cashCents + money)
+                finances = addFinance(finances, "INCOME", "DAILY_MISSION", money, "Missão diária: ${mission.title}")
+                money(money)
+            }
+        }
+        state = state.copy(
+            company = company,
+            expansion = expansion,
+            finances = finances,
+            dailyMissions = state.dailyMissions.copy(
+                missions = state.dailyMissions.missions.map { if (it.id == id) it.copy(claimed = true) else it }
+            ),
+        )
+        notify("Missão diária concluída • $rewardText")
+        persistAndRefresh()
+    }
+
     fun clearMessage() {
         message = null
     }
@@ -127,6 +183,7 @@ class GameStore {
     /** Economia/disciplinas; chamado 1x/s. */
     fun tick() {
         val now = currentTimeMillis()
+        ensureDailyMissions(now)
         updateIdleDiscipline(now)
 
         val elapsed = (now - state.company.lastSimulationAt).coerceAtLeast(0L)
@@ -2069,6 +2126,102 @@ class GameStore {
         val s = total % 60L
         fun two(v: Long) = v.toString().padStart(2, '0')
         return if (h > 0L) "${two(h)}:${two(m)}:${two(s)}" else "${two(m)}:${two(s)}"
+    }
+
+    private fun ensureDailyMissions(now: Long = currentTimeMillis()) {
+        val day = now / DAY_MILLIS
+        if (state.dailyMissions.day == day && state.dailyMissions.missions.size == 3) return
+
+        val level = state.company.companyLevel.coerceAtLeast(1)
+        val variant = (day % 3L).toInt()
+        val moneyMetric = listOf("CONTRACTS_COMPLETED", "MACHINE_MINUTES", "APPROVED_BATCHES")[variant]
+        val moneyTarget = when (moneyMetric) {
+            "MACHINE_MINUTES" -> 60L
+            "APPROVED_BATCHES" -> 1L
+            else -> 2L
+        }
+        val xpMetric = listOf("MANUAL_OPERATIONS", "SHIPPED_BATCHES", "CONTRACTS_COMPLETED")[(variant + 1) % 3]
+        val xpTarget = if (xpMetric == "CONTRACTS_COMPLETED") 2L else 1L
+        val toolMetric = listOf("MACHINE_MINUTES", "APPROVED_BATCHES", "MANUAL_OPERATIONS")[(variant + 2) % 3]
+        val toolTarget = when (toolMetric) {
+            "MACHINE_MINUTES" -> 100L
+            else -> 2L
+        }
+        val toolPool = listOf("broca_madeira", "ferramenta_soldada", "fresa_hss", "broca_carbeto")
+        val toolId = toolPool[((day + level) % toolPool.size).toInt()]
+
+        fun mission(id: String, title: String, description: String, metric: String, target: Long, rewardType: String, rewardValue: Long, rewardItemId: String = "") =
+            DailyMissionSave(
+                id = "${day}_$id",
+                title = title,
+                description = description,
+                metric = metric,
+                target = target,
+                baseValue = dailyMetricValue(metric),
+                rewardType = rewardType,
+                rewardValue = rewardValue,
+                rewardItemId = rewardItemId,
+            )
+
+        val missions = listOf(
+            mission(
+                "cash",
+                dailyMissionTitle(moneyMetric),
+                dailyMissionDescription(moneyMetric, moneyTarget),
+                moneyMetric,
+                moneyTarget,
+                "MONEY",
+                300_000L + level * 75_000L,
+            ),
+            mission(
+                "xp",
+                dailyMissionTitle(xpMetric),
+                dailyMissionDescription(xpMetric, xpTarget),
+                xpMetric,
+                xpTarget,
+                "XP",
+                280L + level * 35L,
+            ),
+            mission(
+                "tool",
+                dailyMissionTitle(toolMetric),
+                dailyMissionDescription(toolMetric, toolTarget),
+                toolMetric,
+                toolTarget,
+                "TOOL",
+                1L,
+                toolId,
+            ),
+        )
+        state = state.copy(dailyMissions = DailyMissionStateSave(day, missions))
+        persist()
+    }
+
+    private fun dailyMetricValue(metric: String): Long = when (metric) {
+        "CONTRACTS_COMPLETED" -> state.contracts.count { it.status == "COMPLETED" }.toLong()
+        "MANUAL_OPERATIONS" -> state.career.totalManualOperations.toLong()
+        "SHIPPED_BATCHES" -> state.career.shippedBatches.toLong()
+        "APPROVED_BATCHES" -> state.career.approvedBatches.toLong()
+        "MACHINE_MINUTES" -> state.machines.sumOf { it.accumulatedWorkMinutes }
+        else -> 0L
+    }
+
+    private fun dailyMissionTitle(metric: String): String = when (metric) {
+        "CONTRACTS_COMPLETED" -> "Carteira em movimento"
+        "MANUAL_OPERATIONS" -> "Dono no chão de fábrica"
+        "SHIPPED_BATCHES" -> "Fluxo até a expedição"
+        "APPROVED_BATCHES" -> "Qualidade sem atalho"
+        "MACHINE_MINUTES" -> "Parque fabril em ritmo"
+        else -> "Missão do turno"
+    }
+
+    private fun dailyMissionDescription(metric: String, target: Long): String = when (metric) {
+        "CONTRACTS_COMPLETED" -> "Conclua $target contrato(s) hoje."
+        "MANUAL_OPERATIONS" -> "Conclua $target operação(ões) manual(is) nas máquinas."
+        "SHIPPED_BATCHES" -> "Expeda $target lote(s) do dono pelo fluxo M → Q → P → E."
+        "APPROVED_BATCHES" -> "Aprove $target lote(s) no Controle de Qualidade."
+        "MACHINE_MINUTES" -> "Acumule $target minutos de trabalho somados nas máquinas."
+        else -> "Complete a meta diária antes da virada."
     }
 
     private fun persistAndRefresh() {
