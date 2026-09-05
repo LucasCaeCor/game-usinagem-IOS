@@ -12,7 +12,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -23,8 +22,6 @@ import br.com.usinagemmaster.game.domain.*
 import br.com.usinagemmaster.game.model.*
 import kotlinx.coroutines.delay
 import kotlin.math.abs
-
-private const val GAME_APP_V27 = "game_app_visual_v27"
 
 private enum class Screen(val title: String, val short: String, val glyph: String) {
     HOME("Painel executivo", "Início", "⌂"),
@@ -191,11 +188,10 @@ private fun IndustrialTopBar(
                     fontWeight = FontWeight.Black,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color = Steel100,
                 )
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text(GameStore.money(store.state.company.cashCents), fontWeight = FontWeight.Black, color = Steel100)
+                Text(GameStore.money(store.state.company.cashCents), fontWeight = FontWeight.Black)
                 Text(
                     "N${store.state.company.companyLevel} • REP ${store.state.company.reputation}",
                     style = MaterialTheme.typography.labelSmall,
@@ -218,62 +214,132 @@ private fun HomeScreen(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(9.dp),
+        contentPadding = PaddingValues(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
             HeroCard(
-                eyebrow = if (open) "● OPERAÇÃO AO VIVO" else "● TURNO ENCERRADO",
+                eyebrow = if (open) "TURNO ATIVO" else "FORA DO EXPEDIENTE",
                 title = d.companyName,
-                subtitle = "Nível ${d.companyLevel} • REP ${d.reputation} • ${d.machines} máquinas • ${d.employees} pessoas",
-                accent = if (open) ProductionGreen else SafetyAmber,
+                subtitle = "${d.machines} máquina(s) • ${d.employees} funcionário(s) • ${d.activeContracts} contrato(s) ativo(s)",
+                accent = if (open) ProductionGreen else Steel500,
             ) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    DashboardArtCardV27(DashboardVisualV27.CASH,"Caixa",GameStore.money(d.cashCents),"Disponível",Modifier.weight(1f))
-                    DashboardArtCardV27(DashboardVisualV27.CARGO,"Carga",GameStore.money(store.pendingCargoCents),"${one(store.pendingCargoUnits)} pç aguardando",Modifier.weight(1f)){onOpen(Screen.FACTORY)}
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CompactStat("Caixa", GameStore.money(d.cashCents), Modifier.weight(1f))
+                    CompactStat("Carga", GameStore.money(store.pendingCargoCents), Modifier.weight(1f))
                 }
-                Spacer(Modifier.height(7.dp))
-                WarehouseBar(d.usedWarehouseSpace,d.warehouseSpace)
-            }
-        }
-
-        if (store.pendingCargo.isNotEmpty() || idle != null) {
-            item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(7.dp)) {
-                    if(store.pendingCargo.isNotEmpty()) DashboardArtCardV27(DashboardVisualV27.FACTORY,"Expedição","${one(store.pendingCargoUnits)} pç","Toque para levar carga",Modifier.weight(1f)){onOpen(Screen.FACTORY)}
-                    if(idle!=null) DashboardArtCardV27(DashboardVisualV27.TEAM,"Atenção",idle!!.name,"Está no celular",Modifier.weight(1f)){onOpen(Screen.EMPLOYEES)}
+                Spacer(Modifier.height(8.dp))
+                WarehouseBar(d.usedWarehouseSpace, d.warehouseSpace)
+                var rename by remember { mutableStateOf(false) }
+                TextButton(onClick = { rename = true }) { Text("Renomear empresa") }
+                if (rename) {
+                    var name by remember { mutableStateOf(store.state.company.name) }
+                    AlertDialog(
+                        onDismissRequest = { rename = false },
+                        title = { Text("Nome da empresa") },
+                        text = {
+                            OutlinedTextField(
+                                value = name,
+                                onValueChange = { name = it.take(36) },
+                                singleLine = true,
+                                label = { Text("Empresa") },
+                            )
+                        },
+                        confirmButton = {
+                            Button(onClick = {
+                                store.renameCompany(name)
+                                rename = false
+                            }) { Text("Salvar") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { rename = false }) { Text("Cancelar") }
+                        },
+                    )
                 }
             }
         }
 
-        item {
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
-                DashboardArtCardV27(DashboardVisualV27.PRODUCTION,"Produção","${one(p.totalUnitsPer10Minutes)} pç","a cada 10 min",Modifier.weight(1f)){onOpen(Screen.FACTORY)}
-                DashboardArtCardV27(DashboardVisualV27.CASH,"Lucro / 10 min",GameStore.money(p.netPer10MinutesCents),"Qualidade ${p.averageQuality}%",Modifier.weight(1f)){onOpen(Screen.FINANCE)}
-            }
-        }
-
-        item { ShiftCommandDeckV27(store) { onOpen(Screen.MINIGAME) } }
+        item { AndroidWorkLifeHomeCard(store) }
         item { AndroidDashboardProgress(store) }
 
-        item { SectionTitle("Central de gestão", "Abra só o setor que precisa da sua atenção") }
+        if (store.pendingCargo.isNotEmpty()) {
+            item {
+                AttentionCard(
+                    title = "CARGA AGUARDANDO EXPEDIÇÃO",
+                    text = "${one(store.pendingCargoUnits)} peças • ${GameStore.money(store.pendingCargoCents)} ainda fora do caixa.",
+                    action = "Abrir Fábrica Viva",
+                    onAction = { onOpen(Screen.FACTORY) },
+                )
+            }
+        }
+
+        if (idle != null) {
+            item {
+                AttentionCard(
+                    title = "${idle.name} está no celular",
+                    text = "A máquina do funcionário perde produção até ele voltar ou você aplicar uma bronca.",
+                    action = "Gerenciar equipe",
+                    onAction = { onOpen(Screen.EMPLOYEES) },
+                    danger = true,
+                )
+            }
+        }
+
         item {
-            Column(verticalArrangement=Arrangement.spacedBy(7.dp)) {
-                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
-                    DashboardArtCardV27(DashboardVisualV27.FACTORY,"Fábrica","${p.operatingMachines}/${d.machines}","produção e layout",Modifier.weight(1f)){onOpen(Screen.FACTORY)}
-                    DashboardArtCardV27(DashboardVisualV27.CONTRACT,"Contratos",d.activeContracts.toString(),"ativos agora",Modifier.weight(1f)){onOpen(Screen.CONTRACTS)}
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MetricCard("Produção / 10 min", "${one(p.totalUnitsPer10Minutes)} pç", "Qualidade ${p.averageQuality}%", Modifier.weight(1f))
+                MetricCard("Lucro / 10 min", GameStore.money(p.netPer10MinutesCents), "3x no fechamento", Modifier.weight(1f))
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MetricCard("Operação", "${p.operatingMachines}/${d.machines}", "máquinas produzindo", Modifier.weight(1f))
+                MetricCard("Impulsos", store.state.boostTokens.toString(), if (store.minigameAvailable) "Precisão disponível" else "Minigame em recarga", Modifier.weight(1f))
+            }
+        }
+
+        item { SectionTitle("Ações do dono", "Atalhos para as rotinas que mudam o jogo") }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = store::dailyBonus, modifier = Modifier.weight(1f)) {
+                    Text("Bônus diário")
                 }
-                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
-                    DashboardArtCardV27(DashboardVisualV27.TEAM,"Equipe",d.employees.toString(),"escalação e fadiga",Modifier.weight(1f)){onOpen(Screen.EMPLOYEES)}
-                    DashboardArtCardV27(DashboardVisualV27.RESEARCH,"Evolução",store.state.career.availableSkillPoints().toString(),"pontos industriais",Modifier.weight(1f)){onOpen(Screen.PROGRESSION)}
-                }
-                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
-                    DashboardArtCardV27(DashboardVisualV27.ROULETTE,"Roleta",store.state.expansion.gachaTickets.toString(),"fichas disponíveis",Modifier.weight(1f)){onOpen(Screen.ROULETTE)}
-                    DashboardArtCardV27(DashboardVisualV27.FACTORY,"Loja",GameStore.money(store.state.company.cashCents),"modernizar parque",Modifier.weight(1f)){onOpen(Screen.STORE)}
+                OutlinedButton(onClick = { onOpen(Screen.MINIGAME) }, modifier = Modifier.weight(1f)) {
+                    Text("Precisão")
                 }
             }
         }
-        item { Spacer(Modifier.height(6.dp)) }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = store::boost10Minutes, modifier = Modifier.weight(1f)) {
+                    Text("+10 min")
+                }
+                OutlinedButton(onClick = store::claimDailyGachaTicket, modifier = Modifier.weight(1f)) {
+                    Text("Ficha diária")
+                }
+            }
+        }
+
+        item { SectionTitle("Gestão industrial", "Tudo que existe no jogo, sem telas de conversão") }
+        item {
+            ManagementGrid(
+                entries = listOf(
+                    Triple(Screen.FACTORY, "Fábrica Viva", "Studio, carga, layout e chão de fábrica"),
+                    Triple(Screen.MACHINES, "Máquinas", "Instaladas, manutenção e operadores"),
+                    Triple(Screen.STORE, "Loja", "Comprar máquinas e tecnologia premium"),
+                    Triple(Screen.EMPLOYEES, "Funcionários", "Equipe, exaustão, Copa e disciplina"),
+                    Triple(Screen.CONTRACTS, "Contratos", "Qualidade, ferramentas, prazo e prêmio"),
+                    Triple(Screen.PROGRESSION, "Evolução", "Metas, pesquisa e especialização"),
+                    Triple(Screen.PROFILE, "Personagem", "Avatar, skins, skills e coleção"),
+                    Triple(Screen.ROULETTE, "Roleta Industrial", "Roda animada, pity e recompensas"),
+                    Triple(Screen.FINANCE, "Finanças", "Caixa e histórico de lançamentos"),
+                    Triple(Screen.COMMUNITY, "Comunidade", "Perfil público e camada online"),
+                ),
+                onOpen = onOpen,
+            )
+        }
+
+        item { Spacer(Modifier.height(8.dp)) }
     }
 }
 
@@ -284,8 +350,21 @@ private fun FactoryScreen(
 ) {
     val p = store.production
     val owner = store.ownerFrame
+    val idle = store.idleEmployee
     val frame = store.factoryFrame
     var mode by remember { mutableStateOf("LIVE") }
+
+    val coffee = frame.workers.count {
+        it.activity == br.com.usinagemmaster.domain.simulation.WorkerActivity.BREAK
+    }
+    val logistics = frame.workers.count {
+        it.activity == br.com.usinagemmaster.domain.simulation.WorkerActivity.FETCHING_MATERIAL ||
+            it.activity == br.com.usinagemmaster.domain.simulation.WorkerActivity.CARRYING_PART ||
+            it.activity == br.com.usinagemmaster.domain.simulation.WorkerActivity.PACKING
+    }
+    val inspection = frame.workers.count {
+        it.activity == br.com.usinagemmaster.domain.simulation.WorkerActivity.INSPECTING
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -293,57 +372,165 @@ private fun FactoryScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item {
-            Surface(color=Steel950) {
-                Row(Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=8.dp),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-                    StatePill(if(frame.open)"● AO VIVO" else "● FECHADO",if(frame.open)ProductionGreen else Steel500)
-                    StatePill("⚙ ${p.operatingMachines} produzindo",ElectricBlue)
-                    if(store.pendingCargo.isNotEmpty()) StatePill("📦 ${one(store.pendingCargoUnits)} pç",SafetyAmber)
+            IndustrialCard(
+                "FÁBRICA VIVA",
+                "${store.state.company.name} • ${if (frame.open) "AO VIVO" else "FORA DO TURNO"}"
+            ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    CompactStat("Produzindo", p.operatingMachines.toString(), Modifier.weight(1f))
+                    CompactStat("Espera", p.idleMachines.toString(), Modifier.weight(1f))
+                    CompactStat("Carga", GameStore.money(store.pendingCargoCents), Modifier.weight(1f))
                 }
             }
         }
+
         item {
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=12.dp),horizontalArrangement=Arrangement.spacedBy(7.dp)) {
-                FilterChip(selected=mode=="LIVE",onClick={mode="LIVE"},label={Text("● Ao vivo")})
-                FilterChip(selected=mode=="LAYOUT",onClick={mode="LAYOUT"},label={Text("▦ Layout")})
-                FilterChip(selected=mode=="LIST",onClick={mode="LIST"},label={Text("☷ Lista técnica")})
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                FilterChip(selected = mode == "LIVE", onClick = { mode = "LIVE" }, label = { Text("Fábrica viva") })
+                FilterChip(selected = mode == "LAYOUT", onClick = { mode = "LAYOUT" }, label = { Text("Editar layout") })
+                FilterChip(selected = mode == "LIST", onClick = { mode = "LIST" }, label = { Text("Lista técnica") })
             }
         }
-        when(mode){
-            "LIVE" -> {
-                item { ShiftCommandDeckV27(store){onOpen(Screen.MINIGAME)} }
-                item { FactoryStudio(store,modifier=Modifier.padding(horizontal=2.dp)) }
-                item {
-                    IndustrialCard("EXPEDIÇÃO DO DONO","A carga só entra no caixa após a viagem") {
-                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically){
-                            Column{Text("${one(store.pendingCargoUnits)} peças",fontWeight=FontWeight.Black,color=Steel100);Text(GameStore.money(store.pendingCargoCents),color=ProductionGreen,fontWeight=FontWeight.Black)}
-                            StatePill(owner.activity.label,if(owner.busy)SafetyAmber else ProductionGreen)
+
+        item {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                StatePill("${p.operatingMachines} produzindo", ProductionGreen)
+                StatePill("${p.idleMachines} em espera", SafetyAmber)
+                if (coffee > 0) StatePill("☕ $coffee na Copa", SafetyAmberSoft)
+                if (logistics > 0) StatePill("▰ $logistics logística", ElectricBlue)
+                if (inspection > 0) StatePill("⌕ $inspection inspeção", RoyalPurple)
+            }
+        }
+
+        if (mode == "LIVE") {
+            item {
+                IndustrialCard("Ações do turno", "Os controles rolam junto da página e não cobrem as máquinas") {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Button(onClick = { onOpen(Screen.MINIGAME) }, modifier = Modifier.weight(1f)) {
+                            Text("Precisão")
                         }
-                        Button(onClick={store.startCargoDelivery();GameFeedback.play(GameSoundEffect.MACHINE_START,store.state.uiSettings.soundEnabled)},enabled=store.pendingCargo.isNotEmpty()&&!owner.busy,modifier=Modifier.fillMaxWidth()){Text(if(owner.busy)"ENTREGA EM ANDAMENTO" else "LEVAR CARGA PARA ENTREGA")}
+                        OutlinedButton(onClick = store::dailyBonus, modifier = Modifier.weight(1f)) {
+                            Text("Bônus diário")
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        OutlinedButton(onClick = store::boost10Minutes, modifier = Modifier.weight(1f)) {
+                            Text("+10 min • ${store.state.boostTokens}")
+                        }
+                        OutlinedButton(onClick = store::buySnack, modifier = Modifier.weight(1f)) {
+                            Text(if (store.snackActive) "Foco ✓" else "Copa")
+                        }
                     }
                 }
             }
-            "LAYOUT" -> item { Box(Modifier.padding(horizontal=12.dp)){ FactoryLayoutEditorV27(store) } }
-            else -> item { Box(Modifier.padding(horizontal=12.dp)){ TechnicalListV27(store) } }
+
+            if (idle != null) {
+                item {
+                    AttentionCard(
+                        title = "${idle.name} está no celular",
+                        text = "A bronca encerra a ociosidade e cria uma janela de tolerância.",
+                        action = "Dar bronca",
+                        onAction = store::reprimandIdleEmployee,
+                        danger = true,
+                    )
+                }
+            }
+
+            item { OwnerCareerPanel(store) }
+            item { FactoryStudio(store, modifier = Modifier.padding(horizontal = 2.dp)) }
+
+            item {
+                IndustrialCard("Expedição do dono", "A carga só vira caixa depois da viagem") {
+                    Text(
+                        "${one(store.pendingCargoUnits)} peças • ${GameStore.money(store.pendingCargoCents)}",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Black,
+                    )
+                    Text("Status: ${owner.activity.label}")
+                    Button(
+                        onClick = store::startCargoDelivery,
+                        enabled = store.pendingCargo.isNotEmpty() && !owner.busy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (owner.busy) "Entrega em andamento" else "Levar CARGA para entrega")
+                    }
+                }
+            }
+
+            item {
+                IndustrialCard("Fechamento da produção", "Resumo depois do chão de fábrica") {
+                    Text("${one(p.totalUnitsPer10Minutes)} pç / 10 min • qualidade ${p.averageQuality}%")
+                    Text("Lucro estimado / 10 min: ${GameStore.money(p.netPer10MinutesCents)}")
+                }
+            }
+        } else if (mode == "LAYOUT") {
+            item { SectionTitle("Editar layout", "Reposicione células sem misturar esta função com a Loja") }
+            items(store.state.machines) { machine ->
+                val def = MachineCatalog.byType(machine.machineType)
+                IndustrialCard(def?.name ?: machine.machineType, "Baia ${machine.gridX + 1}.${machine.gridY + 1}") {
+                    Text("Espaço: ${def?.space ?: 0} m² • condição ${machine.condition}/1000")
+                    Button(onClick = { store.moveMachineNext(machine.id) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Mover para próxima posição livre")
+                    }
+                }
+            }
+        } else {
+            item { SectionTitle("Lista técnica", "Estado, operador e capacidade das máquinas instaladas") }
+            items(store.state.machines) { machine ->
+                val def = MachineCatalog.byType(machine.machineType)
+                val machineFrame = frame.machines.firstOrNull { it.id == machine.id }
+                IndustrialCard(def?.name ?: machine.machineType, "Baia ${machine.gridX + 1}.${machine.gridY + 1}") {
+                    StatePill(machineFrame?.state?.label ?: "Sem leitura", machineStateColor(machineFrame?.state))
+                    Text("Condição ${machine.condition}/1000 • nível ${machine.level}")
+                    Text("Produção-base ${one(def?.baseProductionPerHour ?: 0.0)} pç/h")
+                    Text(
+                        "Operador: ${store.state.employees.firstOrNull { it.assignedMachineId == machine.id }?.name ?: "não atribuído"}"
+                    )
+                }
+            }
         }
+
         item { Spacer(Modifier.height(8.dp)) }
     }
 }
 
 @Composable
 private fun MachinesScreen(store: GameStore) {
-    LazyColumn(modifier=Modifier.fillMaxSize(),contentPadding=PaddingValues(12.dp),verticalArrangement=Arrangement.spacedBy(9.dp)) {
-        item { SectionTitle("Parque fabril","${store.state.machines.size} máquinas • ${store.state.company.usedWarehouseSpace}/${store.state.company.warehouseSpace} m²") }
-        item { OutlinedButton(onClick=store::autoDistributeOperators,modifier=Modifier.fillMaxWidth()){Text("AUTO DISTRIBUIR MELHOR EQUIPE") } }
-        items(store.state.machines){machine->
-            val def=MachineCatalog.byType(machine.machineType)
-            val frame=store.factoryFrame.machines.firstOrNull{it.id==machine.id}
-            val operator=store.state.employees.firstOrNull{it.assignedMachineId==machine.id}
-            MachineCatalogCardV27(def?.name ?: machine.machineType,machine.machineType,"BAIA ${machine.gridX+1}.${machine.gridY+1}",status="${frame?.state?.label ?: "Aguardando"} • ${machine.condition/10}%") {
-                Text("${one(def?.baseProductionPerHour ?: 0.0)} pç/h • operador ${operator?.name ?: "não atribuído"}",style=MaterialTheme.typography.bodySmall,color=Steel400)
-                Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
-                    OutlinedButton(onClick={store.repairMachine(machine.id)},modifier=Modifier.weight(1f)){Text("Manutenção")}
-                    OutlinedButton(onClick={store.assignBestOperator(machine.id)},modifier=Modifier.weight(1f)){Text("Melhor operador")}
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item {
+            SectionTitle(
+                "Máquinas instaladas",
+                "${store.state.machines.size} no parque fabril • ${store.state.company.usedWarehouseSpace}/${store.state.company.warehouseSpace} m²"
+            )
+        }
+        items(store.state.machines) { machine ->
+            val def = MachineCatalog.byType(machine.machineType)
+            val machineFrame = store.factoryFrame.machines.firstOrNull { it.id == machine.id }
+            IndustrialCard(def?.name ?: machine.machineType, "Condição ${machine.condition}/1000") {
+                StatePill(machineFrame?.state?.label ?: "Aguardando", machineStateColor(machineFrame?.state))
+                val operator = store.state.employees.firstOrNull { it.assignedMachineId == machine.id }
+                Text("Operador: ${operator?.name ?: "sem operador"}")
+                Text("Produção-base: ${one(def?.baseProductionPerHour ?: 0.0)} pç/h")
+                Text("Posição: baia ${machine.gridX + 1}.${machine.gridY + 1}")
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(onClick = { store.repairMachine(machine.id) }, modifier = Modifier.weight(1f)) {
+                        Text("Manutenção")
+                    }
+                    OutlinedButton(onClick = { store.moveMachineNext(machine.id) }, modifier = Modifier.weight(1f)) {
+                        Text("Mover")
+                    }
                 }
+                TextButton(onClick = { store.sellMachine(machine.id) }) { Text("Revender máquina") }
             }
         }
     }
@@ -352,26 +539,71 @@ private fun MachinesScreen(store: GameStore) {
 @Composable
 private fun StoreScreen(store: GameStore) {
     var tab by remember { mutableStateOf("CATALOG") }
-    LazyColumn(modifier=Modifier.fillMaxSize(),contentPadding=PaddingValues(12.dp),verticalArrangement=Arrangement.spacedBy(9.dp)) {
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
         item {
-            HeroCard("SHOWROOM INDUSTRIAL","Modernize o parque fabril","A miniatura da loja usa a mesma família visual que aparece no galpão.",SafetyAmber) {
-                DashboardArtCardV27(DashboardVisualV27.CASH,"Saldo disponível",GameStore.money(store.state.company.cashCents),"${store.state.company.usedWarehouseSpace}/${store.state.company.warehouseSpace} m² ocupados")
+            HeroCard(
+                eyebrow = "LOJA INDUSTRIAL",
+                title = "Modernize seu parque fabril",
+                subtitle = "Comprar é diferente de gerenciar: aqui ficam catálogo e tecnologia premium.",
+                accent = SafetyAmber,
+            ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Saldo disponível")
+                    Text(GameStore.money(store.state.company.cashCents), fontWeight = FontWeight.Black)
+                }
+                WarehouseBar(store.state.company.usedWarehouseSpace, store.state.company.warehouseSpace)
             }
         }
-        item { Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(7.dp)){FilterChip(selected=tab=="CATALOG",onClick={tab="CATALOG"},label={Text("Máquinas")});FilterChip(selected=tab=="PREMIUM",onClick={tab="PREMIUM"},label={Text("Tecnologia premium")})} }
-        if(tab=="CATALOG") {
-            items(store.machineShop){def->
-                val hasSpace=store.state.company.usedWarehouseSpace+def.space<=store.state.company.warehouseSpace
-                MachineCatalogCardV27(def.name,def.type.name,"${def.specialty.name} • ${def.space} m²",price=GameStore.money(def.priceCents),status="${one(def.baseProductionPerHour)} pç/h • qualidade ${def.quality}") {
-                    Text("${one(def.powerKw)} kW • manutenção ${GameStore.money(def.maintenanceCents)}",style=MaterialTheme.typography.bodySmall,color=Steel400)
-                    Button(onClick={store.buyMachine(def.type.name);GameFeedback.play(GameSoundEffect.MACHINE_START,store.state.uiSettings.soundEnabled)},enabled=store.state.company.cashCents>=def.priceCents&&hasSpace,modifier=Modifier.fillMaxWidth()){Text(if(hasSpace)"COMPRAR E INSTALAR" else "GALPÃO SEM ESPAÇO")}
+
+        item {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                FilterChip(selected = tab == "CATALOG", onClick = { tab = "CATALOG" }, label = { Text("Máquinas") })
+                FilterChip(selected = tab == "PREMIUM", onClick = { tab = "PREMIUM" }, label = { Text("Premium") })
+            }
+        }
+
+        if (tab == "CATALOG") {
+            item { SectionTitle("Catálogo de máquinas", "Convencionais, CNC e células produtivas") }
+            items(store.machineShop) { def ->
+                IndustrialCard(def.name, "Qualidade ${def.quality} • ${def.space} m²") {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(GameStore.money(def.priceCents), fontWeight = FontWeight.Black)
+                        Text("${one(def.baseProductionPerHour)} pç/h")
+                    }
+                    Text("${one(def.powerKw)} kW • manutenção ${GameStore.money(def.maintenanceCents)}")
+                    val hasSpace = store.state.company.usedWarehouseSpace + def.space <= store.state.company.warehouseSpace
+                    if (!hasSpace) StatePill("Galpão sem espaço", DangerRed)
+                    Button(
+                        onClick = { store.buyMachine(def.type.name) },
+                        enabled = store.state.company.cashCents >= def.priceCents && hasSpace,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Comprar e instalar") }
                 }
             }
         } else {
-            items(GameProgression.premiumMachines){premium->
-                val owned=premium.id in store.state.expansion.premiumMachines
-                MachineCatalogCardV27(premium.name,premium.id,"${premium.rarity.label} • Nv.${premium.minLevel}",price=GameStore.money(premium.priceCents),status=premium.description) {
-                    Button(onClick={store.buyPremiumMachine(premium.id)},enabled=!owned&&store.state.company.companyLevel>=premium.minLevel&&store.state.company.cashCents>=premium.priceCents,modifier=Modifier.fillMaxWidth()){Text(if(owned)"ADQUIRIDA" else "ADQUIRIR TECNOLOGIA")}
+            item { SectionTitle("Tecnologia premium", "Bônus permanentes e células especiais") }
+            items(GameProgression.premiumMachines) { premium ->
+                val owned = premium.id in store.state.expansion.premiumMachines
+                IndustrialCard("${premium.name} • ${premium.rarity.label}", "Nível ${premium.minLevel}") {
+                    Text(premium.description)
+                    Text(GameStore.money(premium.priceCents), fontWeight = FontWeight.Black)
+                    Button(
+                        onClick = { store.buyPremiumMachine(premium.id) },
+                        enabled = !owned &&
+                            store.state.company.companyLevel >= premium.minLevel &&
+                            store.state.company.cashCents >= premium.priceCents,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (owned) "Adquirida" else "Adquirir tecnologia")
+                    }
                 }
             }
         }
@@ -380,42 +612,81 @@ private fun StoreScreen(store: GameStore) {
 
 @Composable
 private fun EmployeesScreen(store: GameStore) {
-    val idle=store.idleEmployee
-    LazyColumn(modifier=Modifier.fillMaxSize(),contentPadding=PaddingValues(12.dp),verticalArrangement=Arrangement.spacedBy(9.dp)) {
+    val idle = store.idleEmployee
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
         item {
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(7.dp)){
-                Button(onClick=store::hireEmployee,modifier=Modifier.weight(1f)){Text("Contratar")}
-                Button(onClick=store::autoDistributeOperators,modifier=Modifier.weight(1f)){Text("Auto distribuir")}
-            }
-        }
-        item {
-            IndustrialCard("ESCALAÇÃO INTELIGENTE","A melhor máquina recebe o operador com maior encaixe técnico") {
-                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Text("Modo foco",color=Steel100,fontWeight=FontWeight.Black);Text(if(store.focusModeRemainingMillis>0L)formatV27Duration(store.focusModeRemainingMillis) else "Disponível",color=if(store.focusModeRemainingMillis>0L)SafetyAmber else ProductionGreen,fontWeight=FontWeight.Black)}
-                Button(onClick=store::buySnack,enabled=store.focusModeRemainingMillis==0L,modifier=Modifier.fillMaxWidth()){Text(if(store.focusModeRemainingMillis>0L)"FOCO ATIVO • NÃO ACUMULA" else "ATIVAR MODO FOCO • 8H")}
-            }
-        }
-        if(idle!=null) item { AttentionCard("${idle.name} está no celular","A produção cai enquanto ele não retorna ao posto.","Dar bronca",store::reprimandIdleEmployee,true) }
-        item { LegendaryEmployeesPanel(store) }
-        items(store.state.employees){employee->
-            val machine=store.state.machines.firstOrNull{it.id==employee.assignedMachineId}
-            ElevatedCard(colors=CardDefaults.elevatedCardColors(containerColor=Steel900,contentColor=Steel100),shape=RoundedCornerShape(18.dp)){
-                Row(Modifier.padding(11.dp),horizontalArrangement=Arrangement.spacedBy(11.dp)){
-                    EmployeePortraitV27(employee,Modifier.size(82.dp),idle?.id==employee.id)
-                    Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(3.dp)){
-                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){Text(employee.name,fontWeight=FontWeight.Black,color=Steel100);if(employee.legendaryCode!=null)StatePill("LENDÁRIO",RoyalPurple)}
-                        Text("${employee.specialty} • Nv.${employee.skillLevel} • ${employee.experience} min",style=MaterialTheme.typography.bodySmall,color=Steel400)
-                        Text("Posto: ${machine?.let{MachineCatalog.byType(it.machineType)?.name} ?: "disponível"}",style=MaterialTheme.typography.bodySmall,color=if(machine==null)ProductionGreen else Steel200)
-                        LinearProgressIndicator(progress=(employee.fatigue/100.0).toFloat().coerceIn(0f,1f),modifier=Modifier.fillMaxWidth())
-                        Text("Fadiga ${employee.fatigue.toInt()}% • moral ${employee.morale}",style=MaterialTheme.typography.labelSmall,color=Steel400)
-                    }
-                }
-                Row(Modifier.fillMaxWidth().padding(horizontal=11.dp,vertical=6.dp),horizontalArrangement=Arrangement.spacedBy(6.dp)){
-                    OutlinedButton(onClick={store.assignEmployeeNext(employee.id)},modifier=Modifier.weight(1f)){Text("Trocar posto")}
-                    OutlinedButton(onClick={store.restEmployee(employee.id)},modifier=Modifier.weight(1f)){Text("Copa")}
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = store::hireEmployee, modifier = Modifier.weight(1f)) { Text("Contratar") }
+                OutlinedButton(onClick = store::buySnack, modifier = Modifier.weight(1f)) {
+                    Text(if (store.snackActive) "Foco ✓" else "Salgados")
                 }
             }
         }
-        if(store.state.employees.isEmpty()) item{EmptyState("Sua primeira contratação","Contrate um operador para liberar a produção automática da máquina inicial.")}
+
+        if (idle != null) {
+            item {
+                AttentionCard(
+                    title = "CELULAR • ${idle.name}",
+                    text = "Ociosidade temporária reduz a produção da máquina desse operador.",
+                    action = "Dar bronca",
+                    onAction = store::reprimandIdleEmployee,
+                    danger = true,
+                )
+            }
+        }
+
+        item {
+            IndustrialCard("Copa e exaustão", "Turno ${if (store.state.shiftMode == ShiftMode.DAY_12H) "07:00–19:00" else "24 horas"}") {
+                Text("Em 24h a exaustão sobe mais rápido. A Copa recupera a equipe e funcionários muito cansados reduzem a eficiência.")
+                if (store.snackActive) {
+                    StatePill("Foco protegido por salgados", ProductionGreen)
+                }
+            }
+        }
+
+        item {
+            AndroidWorkLifeHomeCard(store)
+            Spacer(Modifier.height(10.dp))
+            LegendaryEmployeesPanel(store)
+        }
+
+        items(store.state.employees) { employee ->
+            val isIdle = idle?.id == employee.id
+            IndustrialCard(
+                employee.name,
+                "${employee.specialty} • skill ${employee.skillLevel} • moral ${employee.morale}",
+            ) {
+                if (employee.legendaryCode != null) StatePill("LENDÁRIO", RoyalPurple)
+                if (isIdle) StatePill("NO CELULAR", DangerRed)
+                Text("Traço: ${employee.trait}")
+                Text("Experiência: ${employee.experience} min")
+                Text("Exaustão: ${employee.fatigue.toInt()}%")
+                LinearProgressIndicator(
+                    progress = (employee.fatigue / 100.0).toFloat().coerceIn(0f, 1f),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                val machine = store.state.machines.firstOrNull { it.id == employee.assignedMachineId }
+                Text("Posto: ${machine?.let { MachineCatalog.byType(it.machineType)?.name } ?: "sem máquina"}")
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Button(onClick = { store.assignEmployeeNext(employee.id) }, modifier = Modifier.weight(1f)) { Text("Atribuir") }
+                    OutlinedButton(onClick = { store.restEmployee(employee.id) }, modifier = Modifier.weight(1f)) { Text("Copa") }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    TextButton(onClick = { store.unassignEmployee(employee.id) }) { Text("Liberar posto") }
+                    TextButton(onClick = { store.fireEmployee(employee.id) }) { Text("Desligar") }
+                }
+            }
+        }
+
+        if (store.state.employees.isEmpty()) {
+            item {
+                EmptyState("A máquina inicial precisa de operador", "Contrate seu primeiro funcionário para iniciar produção.")
+            }
+        }
     }
 }
 
@@ -543,7 +814,7 @@ private fun FinanceScreen(store: GameStore) {
         items(store.state.finances.asReversed()) { finance ->
             ElevatedCard(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.elevatedCardColors(containerColor = Steel900, contentColor = Steel100),
+                colors = CardDefaults.elevatedCardColors(containerColor = Steel900),
             ) {
                 Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -626,8 +897,24 @@ private fun ProgressionScreen(store: GameStore) {
                     }
                 }
             }
-            "PESQUISA" -> item { CompanySkillStoryboardV27(store) }
-            "CARREIRA" -> item { IndustrialCareerStoryboardV27(store) }
+            "PESQUISA" -> {
+                item {
+                    Text(
+                        "Pontos disponíveis: ${GameProgression.companySkillPoints(store.state.company.companyLevel, store.state.expansion.companySkills)}",
+                        fontWeight = FontWeight.Black,
+                    )
+                }
+                items(GameProgression.companySkills) { skill ->
+                    SkillCard(
+                        skill = skill,
+                        owned = skill.id in store.state.expansion.companySkills,
+                        onUnlock = { store.unlockCompanySkill(skill.id) },
+                    )
+                }
+            }
+            "CARREIRA" -> {
+                item { IndustrialCareerTree(store) }
+            }
         }
     }
 }
@@ -658,7 +945,7 @@ private fun ProfileScreen(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                listOf("AVATAR", "SKINS", "SKILLS", "ROLETA", "PERSONAGENS").forEach {
+                listOf("AVATAR", "SKINS", "SKILLS", "ROULETA", "PERSONAGENS").forEach {
                     FilterChip(selected = tab == it, onClick = { tab = it }, label = { Text(it) })
                 }
             }
@@ -720,8 +1007,20 @@ private fun ProfileScreen(
                     }
                 }
             }
-            "SKILLS" -> item { PlayerSkillStoryboardV27(store) }
-            "ROLETA" -> item {
+            "SKILLS" -> {
+                item {
+                    Text(
+                        "Pontos: ${GameProgression.playerSkillPoints(store.state.company.companyLevel, store.state.expansion.playerXp, store.state.expansion.playerSkills)}",
+                        fontWeight = FontWeight.Black,
+                    )
+                }
+                items(GameProgression.playerSkills) { skill ->
+                    SkillCard(skill, skill.id in store.state.expansion.playerSkills) {
+                        store.unlockPlayerSkill(skill.id)
+                    }
+                }
+            }
+            "ROULETA" -> item {
                 IndustrialCard(
                     "Roleta Industrial",
                     "Roda visual, animação, ponteiro, pity e revelação da recompensa"
@@ -734,7 +1033,7 @@ private fun ProfileScreen(
                         Text("ABRIR ROLETA")
                     }
                     OutlinedButton(onClick = store::claimDailyGachaTicket, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (store.dailyTicketRemainingMillis == 0L) "Coletar ficha diária" else "Próxima ficha em ${formatV27Duration(store.dailyTicketRemainingMillis)}")
+                        Text("Coletar ficha diária")
                     }
                 }
             }
@@ -988,13 +1287,13 @@ fun IndustrialCard(
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = Steel900, contentColor = Steel100),
+        colors = CardDefaults.elevatedCardColors(containerColor = Steel900),
     ) {
         Column(
             Modifier.fillMaxWidth().padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Steel100)
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
             subtitle?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -1013,12 +1312,12 @@ fun HeroCard(
 ) {
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.elevatedCardColors(containerColor = Steel850, contentColor = Steel100),
+        colors = CardDefaults.elevatedCardColors(containerColor = Steel850),
         shape = RoundedCornerShape(24.dp),
     ) {
         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(eyebrow, color = accent, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black)
-            Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = Steel100)
+            Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
             Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(4.dp))
             body()
@@ -1057,7 +1356,7 @@ private fun MetricCard(
     modifier: Modifier = Modifier,
     accent: androidx.compose.ui.graphics.Color = SafetyAmber,
 ) {
-    ElevatedCard(modifier = modifier, colors = CardDefaults.elevatedCardColors(containerColor = Steel900, contentColor = Steel100)) {
+    ElevatedCard(modifier = modifier, colors = CardDefaults.elevatedCardColors(containerColor = Steel900)) {
         Column(Modifier.padding(12.dp)) {
             Text(title, style = MaterialTheme.typography.labelMedium)
             Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = accent)
@@ -1072,13 +1371,13 @@ fun CompactStat(title: String, value: String, modifier: Modifier = Modifier) {
         modifier.background(Steel900, RoundedCornerShape(14.dp)).padding(10.dp)
     ) {
         Text(title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, fontWeight = FontWeight.Black, color = Steel100)
+        Text(value, fontWeight = FontWeight.Black)
     }
 }
 
 @Composable
 private fun StatusStrip(items: List<Pair<String, String>>) {
-    ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = Steel900, contentColor = Steel100)) {
+    ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = Steel900)) {
         Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items.forEach { (label, value) ->
                 Column(Modifier.weight(1f)) {
@@ -1124,7 +1423,7 @@ private fun EmptyState(title: String, text: String) {
 @Composable
 fun SectionTitle(title: String, subtitle: String) {
     Column {
-        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Steel100)
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
         Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
@@ -1141,7 +1440,7 @@ private fun ManagementGrid(
                     ElevatedCard(
                         onClick = { onOpen(entry.first) },
                         modifier = Modifier.weight(1f),
-                        colors = CardDefaults.elevatedCardColors(containerColor = Steel900, contentColor = Steel100),
+                        colors = CardDefaults.elevatedCardColors(containerColor = Steel900),
                     ) {
                         Column(Modifier.padding(12.dp)) {
                             Text(entry.second, fontWeight = FontWeight.Black)

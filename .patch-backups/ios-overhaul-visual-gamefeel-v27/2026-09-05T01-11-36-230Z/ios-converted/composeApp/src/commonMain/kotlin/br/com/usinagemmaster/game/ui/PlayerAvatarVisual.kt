@@ -22,8 +22,6 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
-private const val AVATAR_VISUAL_V27 = "avatar_humanized_v27"
-
 @Composable
 fun PlayerAvatarPreview(
     avatar: PlayerProfileSave,
@@ -116,8 +114,7 @@ fun DrawScope.drawPlayerAvatarFigure(
         else -> 0f
     }
     val step = if (walking) sin(cycle) * 4.8f * scale else 0f
-    val breathing = if (walking) 0f else sin(cycle * .62f) * .85f * scale
-    val bob = if (walking) kotlin.math.abs(sin(cycle)) * 1.7f * scale else breathing
+    val bob = if (walking) kotlin.math.abs(sin(cycle)) * 1.7f * scale else sin(cycle) * .5f * scale
     val torsoW = 20f * scale * bodyWidthFactor
     val torsoH = 28f * scale * styleHeight
     val headR = 7.8f * scale
@@ -147,10 +144,6 @@ fun DrawScope.drawPlayerAvatarFigure(
         cornerRadius = androidx.compose.ui.geometry.CornerRadius(if (female) 6f * scale else 4f * scale)
     )
     drawRect(reflect.copy(alpha = .85f), Offset(x - torsoW / 2f, shoulderY + 17f * scale), Size(torsoW, 2.2f * scale))
-    // humanized-v27 shoulder seams / pockets add volume without changing the saved avatar model.
-    drawLine(Color.White.copy(alpha=.12f), Offset(x-torsoW*.38f,shoulderY+4f*scale), Offset(x-torsoW*.12f,shoulderY+8f*scale), .9f*scale)
-    drawLine(Color.Black.copy(alpha=.18f), Offset(x+torsoW*.10f,shoulderY+8f*scale), Offset(x+torsoW*.36f,shoulderY+4f*scale), .9f*scale)
-    drawRoundRect(Color.Black.copy(alpha=.16f), Offset(x+torsoW*.12f,shoulderY+10f*scale), Size(torsoW*.24f,5.8f*scale), androidx.compose.ui.geometry.CornerRadius(1.5f*scale))
 
     if (style == "KENDAO_KIMONO") {
         drawLine(Color(0xFF39434A), Offset(x - torsoW*.35f, shoulderY + 3f*scale), Offset(x + torsoW*.30f, shoulderY + 17f*scale), 2f*scale)
@@ -206,20 +199,9 @@ fun DrawScope.drawPlayerAvatarFigure(
         else -> drawArc(hair, 185f, 170f, true, Offset(headCenter.x - headR, headCenter.y - headR), Size(headR * 2f, headR * 1.55f))
     }
 
-    // Rosto V27: orelhas, sobrancelhas, nariz, brilho nos olhos e expressão leve.
-    drawCircle(skin.copy(alpha=.96f), 2.25f*scale, headCenter + Offset(-headR*.95f, .7f*scale))
-    drawCircle(skin.copy(alpha=.96f), 2.25f*scale, headCenter + Offset(headR*.95f, .7f*scale))
-    val eyeY = headCenter.y - .25f*scale
-    drawLine(Color(0xFF4E352A), Offset(headCenter.x-4.3f*scale,eyeY-2.3f*scale), Offset(headCenter.x-1.4f*scale,eyeY-2.7f*scale), .75f*scale)
-    drawLine(Color(0xFF4E352A), Offset(headCenter.x+1.4f*scale,eyeY-2.7f*scale), Offset(headCenter.x+4.3f*scale,eyeY-2.3f*scale), .75f*scale)
-    drawCircle(Color(0xFF182127), 1.15f * scale, Offset(headCenter.x - 2.7f * scale, eyeY))
-    drawCircle(Color(0xFF182127), 1.15f * scale, Offset(headCenter.x + 2.7f * scale, eyeY))
-    drawCircle(Color.White.copy(alpha=.75f), .32f*scale, Offset(headCenter.x-2.4f*scale,eyeY-.35f*scale))
-    drawCircle(Color.White.copy(alpha=.75f), .32f*scale, Offset(headCenter.x+3.0f*scale,eyeY-.35f*scale))
-    drawLine(Color(0xFFB47B5D), Offset(headCenter.x+.2f*scale,headCenter.y+.5f*scale), Offset(headCenter.x-1.0f*scale,headCenter.y+2.7f*scale), .65f*scale)
-    drawArc(Color(0xFF8B5E48), 12f, 156f, false, Offset(headCenter.x-3.3f*scale,headCenter.y+2.4f*scale), Size(6.6f*scale,4.8f*scale), style=Stroke(.75f*scale))
-    drawCircle(Color(0xFFE89586).copy(alpha=.16f), 1.7f*scale, headCenter+Offset(-4.8f*scale,2.1f*scale))
-    drawCircle(Color(0xFFE89586).copy(alpha=.16f), 1.7f*scale, headCenter+Offset(4.8f*scale,2.1f*scale))
+    drawCircle(Color(0xFF182127), 1f * scale, Offset(headCenter.x - 2.7f * scale, headCenter.y))
+    drawCircle(Color(0xFF182127), 1f * scale, Offset(headCenter.x + 2.7f * scale, headCenter.y))
+    drawLine(Color(0xFF8B5E48), Offset(headCenter.x - 2f * scale, headCenter.y + 4f * scale), Offset(headCenter.x + 2f * scale, headCenter.y + 4f * scale), .8f * scale)
 
     if (style == "PINOQUIO") {
         drawLine(skin, headCenter + Offset(3f*scale, 2f*scale), headCenter + Offset(11f*scale, 4f*scale), 2f*scale)

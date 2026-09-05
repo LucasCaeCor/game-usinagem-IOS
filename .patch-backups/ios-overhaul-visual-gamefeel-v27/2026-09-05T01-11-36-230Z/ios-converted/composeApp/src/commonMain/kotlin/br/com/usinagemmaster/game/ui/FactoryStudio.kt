@@ -35,12 +35,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.drawText
-import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import br.com.usinagemmaster.core.util.Formatters
 import br.com.usinagemmaster.domain.catalog.MachineCatalog
 import br.com.usinagemmaster.domain.simulation.*
@@ -49,19 +44,15 @@ import br.com.usinagemmaster.game.domain.MachineMinigameCatalog
 import br.com.usinagemmaster.game.domain.MinigameKind
 import br.com.usinagemmaster.game.domain.MinigameResult
 import br.com.usinagemmaster.game.domain.MachineMastery
-import br.com.usinagemmaster.game.domain.LegendaryEmployeeCatalog
 import br.com.usinagemmaster.game.domain.ProductionStage
 import br.com.usinagemmaster.game.model.EmployeeSave
 import br.com.usinagemmaster.game.model.MachineSave
 import br.com.usinagemmaster.game.model.OwnerWorkBatchSave
 import br.com.usinagemmaster.game.model.PlayerProfileSave
-import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
-
-private const val FACTORY_STUDIO_V27 = "factory_studio_v27"
 
 @Composable
 fun FactoryStudio(
@@ -78,7 +69,6 @@ fun FactoryStudio(
     var showQuality by remember { mutableStateOf(false) }
     var saleMachineId by remember { mutableStateOf<String?>(null) }
     var reprimandTargetId by remember { mutableStateOf<String?>(null) }
-    val textMeasurer = rememberTextMeasurer()
 
     val frame = store.factoryFrame
     val batch = store.state.career.activeBatch
@@ -89,7 +79,7 @@ fun FactoryStudio(
     }
     val sceneFloor = remember(machineInputs) { FactoryFloor(machineInputs) }
 
-    val transition = rememberInfiniteTransition(label = "factory_studio_v25")
+    val transition = rememberInfiniteTransition(label = "factory_studio_v26")
     val workPhase by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
@@ -102,27 +92,6 @@ fun FactoryStudio(
         animationSpec = infiniteRepeatable(tween(1450), RepeatMode.Reverse),
         label = "scene_pulse",
     )
-
-    val soundEnabled = store.state.uiSettings.soundEnabled
-    val hapticsEnabled = store.state.uiSettings.hapticsEnabled
-    val runningCount = frame.machines.count { it.state == FactoryMachineState.RUNNING }
-    val hotWork = store.state.machines.any { machine ->
-        val active = frame.machines.firstOrNull { it.id == machine.id }?.state == FactoryMachineState.RUNNING
-        active && (machine.machineType.contains("WELD", true) || machine.machineType.contains("LASER", true) || machine.machineType.contains("PLASMA", true))
-    }
-    LaunchedEffect(frame.open, soundEnabled) {
-        GameFeedback.setFactoryAmbience(frame.open && soundEnabled)
-    }
-    DisposableEffect(soundEnabled) {
-        onDispose { GameFeedback.setFactoryAmbience(false) }
-    }
-    LaunchedEffect(frame.open, soundEnabled, runningCount, hotWork) {
-        if (!frame.open || !soundEnabled || runningCount == 0) return@LaunchedEffect
-        while (true) {
-            GameFeedback.play(if (hotWork) GameSoundEffect.WELD_SPARK else GameSoundEffect.MACHINE_TICK, true)
-            delay(if (hotWork) 2_400L else 3_100L)
-        }
-    }
 
     var ownerWorkCell by remember { mutableStateOf(FactoryFloor.ENTRY) }
     var ownerWorkRoute by remember { mutableStateOf(listOf(FactoryFloor.ENTRY.point())) }
@@ -192,9 +161,9 @@ fun FactoryStudio(
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column(Modifier.weight(1f)) {
-                    Text("CHÃO DE FÁBRICA • INTERATIVO", fontWeight = FontWeight.Black, color = Steel100)
+                    Text("FÁBRICA VIVA • CONTROLE TÁTICO", fontWeight = FontWeight.Black, color = Color.White)
                     Text(
-                        if (frame.open) "Turno ativo • toque em máquinas, operadores, Q, P e E" else "Turno fechado • equipe em descanso",
+                        if (frame.open) "Turno ativo • máquinas, operadores e estações respondem ao toque" else "Turno fechado • equipe em descanso",
                         style = MaterialTheme.typography.bodySmall,
                         color = if (frame.open) ProductionGreen else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -211,7 +180,7 @@ fun FactoryStudio(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(610.dp)
+                    .height(520.dp)
                     .background(Steel950, RoundedCornerShape(18.dp))
                     .border(1.dp, Steel700, RoundedCornerShape(18.dp)),
             ) {
@@ -259,37 +228,21 @@ fun FactoryStudio(
                                     val q = point(FactoryFloor.INSPECTION.point())
                                     if (distance(tap, q) <= stationRadius && batch != null) {
                                         when (stage) {
-                                            ProductionStage.MACHINED -> {
-                                                store.moveOwnerBatchToQuality()
-                                                GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled)
-                                                GameFeedback.haptic(hapticsEnabled)
-                                            }
-                                            ProductionStage.WAITING_QC, ProductionStage.QC -> {
-                                                showQuality = true
-                                                GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled)
-                                            }
+                                            ProductionStage.MACHINED -> store.moveOwnerBatchToQuality()
+                                            ProductionStage.WAITING_QC, ProductionStage.QC -> showQuality = true
                                             else -> Unit
                                         }
                                         return@detectTapGestures
                                     }
                                     val p = point(FactoryFloor.STAGING.point())
                                     if (distance(tap, p) <= stationRadius) {
-                                        if (stage == ProductionStage.APPROVED) {
-                                            store.packOwnerBatch()
-                                            GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled)
-                                        } else if (store.pendingCargo.isNotEmpty() && !frame.owner.busy) {
-                                            store.startCargoDelivery()
-                                            GameFeedback.play(GameSoundEffect.MACHINE_START, soundEnabled)
-                                        }
+                                        if (stage == ProductionStage.APPROVED) store.packOwnerBatch()
+                                        else if (store.pendingCargo.isNotEmpty() && !frame.owner.busy) store.startCargoDelivery()
                                         return@detectTapGestures
                                     }
                                     val e = point(FactoryFloor.SHIPPING.point())
                                     if (distance(tap, e) <= stationRadius && batch != null) {
-                                        if (stage == ProductionStage.READY_TO_SHIP) {
-                                            store.shipOwnerBatch()
-                                            GameFeedback.play(GameSoundEffect.REWARD, soundEnabled)
-                                            GameFeedback.haptic(hapticsEnabled)
-                                        }
+                                        if (stage == ProductionStage.READY_TO_SHIP) store.shipOwnerBatch()
                                         return@detectTapGestures
                                     }
 
@@ -327,7 +280,6 @@ fun FactoryStudio(
                                         selectedMachineId = touchedMachine.id
                                         selectedWorkerId = null
                                         machineDialogId = touchedMachine.id
-                                        GameFeedback.play(GameSoundEffect.UI_CLICK, soundEnabled)
                                     } else {
                                         selectedMachineId = null
                                         selectedWorkerId = null
@@ -348,12 +300,12 @@ fun FactoryStudio(
                         ownerOverrideCarrying = ownerCarrying,
                         phase = workPhase,
                         pulse = pulse,
-                        textMeasurer = textMeasurer,
                     )
                 }
 
                 StudioSceneHud(
                     modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+                    store = store,
                     frame = frame,
                     batch = batch,
                 )
@@ -465,13 +417,12 @@ private fun DrawScope.drawFactoryStudioScene(
     ownerOverrideCarrying: Boolean,
     phase: Float,
     pulse: Float,
-    textMeasurer: androidx.compose.ui.text.TextMeasurer,
 ) {
-    val baseTileW = min(size.width / 24f, size.height / 19f)
+    val baseTileW = min(size.width / 22f, size.height / 17f)
     val halfW = baseTileW * zoom
-    val stepX = halfW * .91f
-    val stepY = halfW * .60f
-    val origin = Offset(size.width * .075f + pan.x, size.height * .245f + pan.y)
+    val stepX = halfW * .86f
+    val stepY = halfW * .56f
+    val origin = Offset(size.width * .12f + pan.x, size.height * .24f + pan.y)
 
     fun project(p: FloorPoint): Offset = Offset(
         origin.x + p.x * stepX,
@@ -588,9 +539,6 @@ private fun DrawScope.drawFactoryStudioScene(
             )
         }
         drawMachineSilhouette(at, halfW, machine.machineType, color, machineFrame?.progress ?: phase)
-        if (machineFrame?.state == FactoryMachineState.RUNNING) {
-            drawFactoryRunningEffectsV27(at, halfW, machine.machineType, phase, pulse)
-        }
     }
 
     // Operadores em suas micro-rotinas.
@@ -665,70 +613,12 @@ private fun DrawScope.drawFactoryStudioScene(
     )
     if (ownerCarrying) drawOwnerCargoCrate(ownerAt, halfW)
 
-    val speechWorker = selectedWorkerId?.let { id -> frame.workers.firstOrNull { it.id == id } }
-        ?: frame.workers.firstOrNull { worker ->
-            val employee = store.state.employees.firstOrNull { it.id == worker.id }
-            employee?.legendaryCode != null && phase in .12f..0.42f
-        }
-    if (speechWorker != null) {
-        val employee = store.state.employees.firstOrNull { it.id == speechWorker.id }
-        if (employee != null) {
-            val working = speechWorker.activity == WorkerActivity.WORKING || speechWorker.activity == WorkerActivity.SETTING_UP || speechWorker.activity == WorkerActivity.CARRYING_PART
-            val legendary = LegendaryEmployeeCatalog.quote(employee.legendaryCode, working, ((phase * 100f).toInt() + employee.id.hashCode()))
-            val quote = legendary ?: studioWorkerQuoteV27(employee, speechWorker.activity)
-            drawSpeechBubbleV27(project(speechWorker.position) + Offset(halfW * .35f, -halfW * 2.7f), quote, textMeasurer, halfW)
-        }
-    }
-
     // Exaustores/luminárias.
     repeat(5) { i ->
         val at = project(FloorPoint(2f + i * 4f, 1f))
         drawCircle(Color(0xFF9CB0B8).copy(alpha = .28f), halfW * .22f, at)
         drawCircle(Color(0xFFFFE0A0).copy(alpha = .12f), halfW * .65f, at)
     }
-}
-
-private fun DrawScope.drawFactoryRunningEffectsV27(at: Offset, scale: Float, type: String, phase: Float, pulse: Float) {
-    val hot = type.contains("WELD", true) || type.contains("LASER", true) || type.contains("PLASMA", true)
-    val cnc = type.contains("CNC", true) || type.contains("MACHINING", true)
-    drawCircle((if (hot) SafetyAmber else ElectricBlue).copy(alpha = .08f + pulse * .08f), scale * 1.18f, at - Offset(0f, scale * .34f))
-    if (hot) {
-        repeat(4) { i ->
-            val d = scale * (.18f + i * .10f)
-            val swing = kotlin.math.sin((phase + i * .17f) * 6.28318f)
-            drawLine(Color(0xFFFFD75A).copy(alpha=.72f), at + Offset(0f,-scale*.48f), at + Offset((swing*d),-scale*.48f-d), (scale*.025f).coerceAtLeast(1f))
-        }
-    } else if (cnc) {
-        drawLine(Color(0xFF7DE7FF).copy(alpha=.50f), at + Offset(-scale*.32f,-scale*.30f), at + Offset(scale*.26f,-scale*.52f), (scale*.035f).coerceAtLeast(1f))
-        repeat(3){i-> drawCircle(Color(0xFFD8E4E8).copy(alpha=.42f),scale*.035f,at+Offset((-scale*.15f+i*scale*.14f),-scale*(.18f+.12f*phase)))}
-    } else {
-        repeat(3){i-> val x=(-.24f+i*.22f)*scale; drawLine(Color(0xFFC8D1D5).copy(alpha=.46f),at+Offset(x,-scale*.24f),at+Offset(x+scale*.10f,-scale*(.45f+.08f*phase)),(scale*.025f).coerceAtLeast(1f))}
-    }
-}
-
-private fun studioWorkerQuoteV27(employee: EmployeeSave, activity: WorkerActivity): String = when (activity) {
-    WorkerActivity.PHONE -> "Tá bom, chefe... guardando o celular."
-    WorkerActivity.BREAK -> "Café rápido e volto pro posto."
-    WorkerActivity.FETCHING_MATERIAL -> "Buscando material. Não vou deixar a máquina esperando."
-    WorkerActivity.FETCHING_TOOLS -> "Pegando ferramenta pro próximo setup."
-    WorkerActivity.SETTING_UP -> "Setup quase pronto."
-    WorkerActivity.INSPECTING -> "Conferindo medida e acabamento."
-    WorkerActivity.CARRYING_PART -> "Levando o lote pra próxima etapa."
-    WorkerActivity.WORKING -> if (employee.specialty.contains("CNC", true)) "Offset conferido. Programa rodando." else "Cavaco saindo bonito hoje."
-    else -> "Pronto pro próximo serviço."
-}
-
-private fun DrawScope.drawSpeechBubbleV27(at: Offset, text: String, measurer: androidx.compose.ui.text.TextMeasurer, scale: Float) {
-    val maxWidth = (scale * 7.6f).toInt().coerceAtLeast(120)
-    val layout = measurer.measure(text, style = TextStyle(color = Steel100, fontSize = 10.sp, fontWeight = FontWeight.Bold), constraints = Constraints(maxWidth = maxWidth), maxLines = 3)
-    val pad = scale * .34f
-    val w = layout.size.width + pad * 2f
-    val h = layout.size.height + pad * 1.5f
-    val left = (at.x - w * .5f).coerceIn(4f, size.width - w - 4f)
-    val top = at.y.coerceIn(6f, size.height - h - 6f)
-    drawRoundRect(Steel950.copy(alpha=.95f), Offset(left,top), Size(w,h), CornerRadius(scale*.28f))
-    drawRoundRect(ElectricBlue.copy(alpha=.72f), Offset(left,top), Size(w,h), CornerRadius(scale*.28f), style=Stroke((scale*.055f).coerceAtLeast(1f)))
-    drawText(measurer, layout, topLeft = Offset(left+pad, top+pad*.7f))
 }
 
 private fun DrawScope.drawZone(at: Offset, scale: Float, color: Color) {
@@ -1018,14 +908,44 @@ private fun DrawScope.drawWorkerActivityProp(
     }
 }
 
-private fun studioBaseTile(width: Float, height: Float): Float = min(width / 24f, height / 19f)
+private fun studioWorkerSpeech(employee: EmployeeSave, activity: WorkerActivity?): String = when (activity) {
+    WorkerActivity.PHONE -> "Vou largar o celular e voltar para o serviço."
+    WorkerActivity.BREAK -> "Cafezinho tomado. Já volto para a operação."
+    WorkerActivity.INSPECTING -> "Estou conferindo medida e acabamento do lote."
+    WorkerActivity.FETCHING_MATERIAL -> "Buscando matéria-prima para não parar a máquina."
+    WorkerActivity.FETCHING_TOOLS -> "Pegando a ferramenta certa para manter o setup afiado."
+    WorkerActivity.CARRYING_PART -> "Estou levando as peças para a próxima etapa."
+    WorkerActivity.WORKING -> when {
+        employee.specialty.contains("CNC") -> "Estou ajustando parâmetros para tirar mais qualidade."
+        employee.specialty.contains("TORNO", ignoreCase = true) -> "Torno alinhado e corte estável."
+        employee.specialty.contains("FRESA", ignoreCase = true) -> "Fresando com atenção para não perder precisão."
+        else -> "Máquina rodando redondo, chefe."
+    }
+    WorkerActivity.OFF_SHIFT -> "Fora do turno."
+    else -> "Pronto para o próximo serviço."
+}
+
+private fun studioPad2(value: Long): String = value.toString().padStart(2, '0')
+
+private fun studioFormatDuration(value: Long): String {
+    val total = (value / 1000L).coerceAtLeast(0L)
+    val h = total / 3600L
+    val m = (total % 3600L) / 60L
+    val s = total % 60L
+    return if (h > 0L) "${studioPad2(h)}:${studioPad2(m)}:${studioPad2(s)}" else "${studioPad2(m)}:${studioPad2(s)}"
+}
+
+private fun studioBaseTile(width: Float, height: Float): Float = min(width / 22f, height / 17f)
 
 private fun studioProject(p: FloorPoint, width: Float, height: Float, zoom: Float, pan: Offset): Offset {
     val halfW = studioBaseTile(width, height) * zoom
-    val stepX = halfW * .91f
-    val stepY = halfW * .60f
-    val origin = Offset(width * .075f + pan.x, height * .245f + pan.y)
-    return Offset(origin.x + p.x * stepX, origin.y + p.y * stepY)
+    val stepX = halfW * .86f
+    val stepY = halfW * .56f
+    val origin = Offset(width * .12f + pan.x, height * .24f + pan.y)
+    return Offset(
+        origin.x + p.x * stepX,
+        origin.y + p.y * stepY,
+    )
 }
 
 private fun studioDistance(a: Offset, b: Offset): Float {
@@ -1035,8 +955,8 @@ private fun studioDistance(a: Offset, b: Offset): Float {
 }
 
 private fun studioClampPan(pan: Offset, zoom: Float): Offset {
-    val limitX = 620f * zoom
-    val limitY = 520f * zoom
+    val limitX = 560f * zoom
+    val limitY = 480f * zoom
     return Offset(pan.x.coerceIn(-limitX, limitX), pan.y.coerceIn(-limitY, limitY))
 }
 
@@ -1101,22 +1021,42 @@ private fun DrawScope.drawOwnerCargoCrate(ownerAt: Offset, halfW: Float) {
 @Composable
 private fun StudioSceneHud(
     modifier: Modifier,
+    store: GameStore,
     frame: FactoryFrame,
     batch: OwnerWorkBatchSave?,
 ) {
     val running = frame.machines.count { it.state == FactoryMachineState.RUNNING }
     val waiting = frame.machines.count { it.state == FactoryMachineState.IDLE || it.state == FactoryMachineState.WAITING_MATERIAL }
+    val cargoText = if (store.pendingCargo.isEmpty()) "Sem carga" else "${studioOneDecimal(store.pendingCargoUnits)} pç • ${GameStore.money(store.pendingCargoCents)}"
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
-        color = Steel950.copy(alpha = .86f),
-        border = BorderStroke(1.dp, Steel700.copy(alpha = .8f)),
+        shape = RoundedCornerShape(14.dp),
+        color = Steel950.copy(alpha = .90f),
+        border = BorderStroke(1.dp, Steel700.copy(alpha = .9f)),
     ) {
-        Column(Modifier.padding(horizontal = 9.dp, vertical = 7.dp)) {
-            Text("● $running operando  •  $waiting aguardando", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("🏭 ${store.dashboard.companyName}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = Color.White)
+            Text("⚙ $running operando • ⏸ $waiting aguardando", style = MaterialTheme.typography.labelSmall, color = Color.White)
+            Text("📦 Carga: $cargoText", style = MaterialTheme.typography.labelSmall, color = Color.White)
+            Text(
+                if (store.focusModeRemainingMillis > 0L) "🎯 Modo foco: ${studioFormatDuration(store.focusModeRemainingMillis)}" else "🎯 Modo foco disponível",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (store.focusModeRemainingMillis > 0L) SafetyAmber else ProductionGreen,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                if (store.dailyTicketRemainingMillis > 0L) "🎟 Ficha em ${studioFormatDuration(store.dailyTicketRemainingMillis)}" else "🎟 Ficha diária disponível",
+                style = MaterialTheme.typography.labelSmall,
+                color = ElectricBlue,
+            )
+            Text(
+                if (store.dailyBonusRemainingMillis > 0L) "🎁 Bônus em ${studioFormatDuration(store.dailyBonusRemainingMillis)}" else "🎁 Bônus diário disponível",
+                style = MaterialTheme.typography.labelSmall,
+                color = SafetyAmber,
+            )
             batch?.let {
                 val stage = studioStage(it)
-                Text("DONO • ${stage?.label ?: it.stage}", style = MaterialTheme.typography.labelSmall, color = SafetyAmber, fontWeight = FontWeight.Black)
+                Text("👤 Dono • ${stage?.label ?: it.stage}", style = MaterialTheme.typography.labelSmall, color = SafetyAmber, fontWeight = FontWeight.Black)
             }
         }
     }
@@ -1127,39 +1067,53 @@ private fun StudioOwnerActionStrip(store: GameStore, batch: OwnerWorkBatchSave?)
     Spacer(Modifier.height(8.dp))
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = Steel950.copy(alpha = .76f),
+        color = Steel950.copy(alpha = .72f),
         shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, Steel700.copy(alpha = .8f)),
+        border = BorderStroke(1.dp, Steel700.copy(alpha = .7f)),
     ) {
-        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             val stage = studioStage(batch)
-            Text("FLUXO DO DONO", fontWeight = FontWeight.Black, color = Steel100)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                listOf("MÁQUINA", "Q", "P", "E").forEachIndexed { index, label ->
+            Text("AÇÕES DO TURNO", fontWeight = FontWeight.Black, color = Color.White)
+            val strip = listOf("Máquina", "Q", "P", "E")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                strip.forEachIndexed { index, label ->
                     val active = when (stage) {
-                        null, ProductionStage.RAW, ProductionStage.WAITING_MACHINE, ProductionStage.MACHINING, ProductionStage.REWORK -> index == 0
-                        ProductionStage.MACHINED, ProductionStage.WAITING_QC, ProductionStage.QC -> index == 1
+                        null -> index == 0
+                        ProductionStage.MACHINED, ProductionStage.REWORK, ProductionStage.MACHINING -> index == 1
+                        ProductionStage.WAITING_QC, ProductionStage.QC -> index == 1
                         ProductionStage.APPROVED, ProductionStage.PACKING -> index == 2
                         ProductionStage.READY_TO_SHIP, ProductionStage.SHIPPED -> index == 3
-                        else -> false
+                        else -> index == 0
                     }
-                    Surface(modifier = Modifier.weight(1f), shape = RoundedCornerShape(9.dp), color = if (active) ElectricBlue.copy(alpha=.18f) else Steel900, border = BorderStroke(1.dp, if(active) ElectricBlue else Steel700.copy(alpha=.5f))) {
-                        Box(Modifier.padding(vertical=7.dp), contentAlignment=Alignment.Center) { Text(label, style=MaterialTheme.typography.labelSmall, fontWeight=FontWeight.Black, color=Steel100) }
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (active) ElectricBlue.copy(alpha = .18f) else Steel900,
+                        border = BorderStroke(1.dp, if (active) ElectricBlue else Steel700.copy(alpha = .5f)),
+                    ) {
+                        Box(Modifier.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                            Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
                     }
                 }
             }
             if (batch == null) {
-                Text("Toque numa máquina para o dono assumir um lote. O minigame continua opcional.", style = MaterialTheme.typography.bodySmall, color = Steel400)
+                Text("Dono disponível • toque numa máquina para assumir um lote ou acompanhe a equipe automática.", style = MaterialTheme.typography.bodySmall, color = Color(0xFFD5DDE1))
             } else {
-                Text("${batch.producedQuantity} pç • qualidade ${batch.quality} • precisão ${batch.precision}%", style = MaterialTheme.typography.bodySmall, color=Steel200)
-                Text(when (stage) {
-                    ProductionStage.MACHINED -> "PRÓXIMO: toque em Q para levar o lote à Qualidade."
-                    ProductionStage.WAITING_QC, ProductionStage.QC -> "PRÓXIMO: toque em Q e faça a inspeção dimensional."
-                    ProductionStage.REWORK -> "PRÓXIMO: toque na máquina e execute o retrabalho."
-                    ProductionStage.APPROVED -> "PRÓXIMO: toque em P para preparar e embalar."
-                    ProductionStage.READY_TO_SHIP -> "PRÓXIMO: toque em E para expedir."
-                    else -> "Acompanhe o destaque azul e a rota do dono."
-                }, style=MaterialTheme.typography.bodySmall, color=SafetyAmber, fontWeight=FontWeight.Bold)
+                Text("Lote do dono • ${stage?.label ?: batch.stage}", fontWeight = FontWeight.Black, color = Color.White)
+                Text("${batch.producedQuantity} pç • Q${batch.quality} • precisão ${batch.precision}%", style = MaterialTheme.typography.bodySmall, color = Color(0xFFD5DDE1))
+                Text(
+                    when (stage) {
+                        ProductionStage.MACHINED -> "Próximo passo: levar o lote para Q (Qualidade)."
+                        ProductionStage.WAITING_QC, ProductionStage.QC -> "Próximo passo: medir e aprovar ou mandar para retrabalho."
+                        ProductionStage.REWORK -> "Próximo passo: voltar para a máquina e executar o retrabalho."
+                        ProductionStage.APPROVED -> "Próximo passo: enviar para P (Preparação/Embalagem)."
+                        ProductionStage.READY_TO_SHIP -> "Próximo passo: despachar em E (Expedição)."
+                        else -> "Acompanhe a rota do lote no chão de fábrica."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = SafetyAmber,
+                )
             }
         }
     }
@@ -1171,22 +1125,26 @@ private fun StudioSelectedWorkerCard(store: GameStore, employeeId: String) {
     val worker = store.factoryFrame.workers.firstOrNull { it.id == employeeId }
     val machine = store.state.machines.firstOrNull { it.id == employee.assignedMachineId }
     val machineName = machine?.let { MachineCatalog.byType(it.machineType)?.name ?: it.machineType } ?: "Sem máquina"
+    val speech = studioWorkerSpeech(employee, worker?.activity)
     Spacer(Modifier.height(8.dp))
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
-        color = Steel950.copy(alpha = .72f),
+        color = Steel950.copy(alpha = .76f),
         border = BorderStroke(1.dp, if (worker?.activity == WorkerActivity.PHONE) DangerRed.copy(alpha = .65f) else Steel700),
     ) {
-        Column(Modifier.padding(11.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Column(Modifier.padding(11.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column(Modifier.weight(1f)) {
-                    Text(employee.name, fontWeight = FontWeight.Black)
-                    Text("${employee.specialty} • Nv.${employee.skillLevel} • ${employee.trait}", style = MaterialTheme.typography.bodySmall, color = Steel400)
+                    Text(employee.name, fontWeight = FontWeight.Black, color = Color.White)
+                    Text("${employee.specialty} • Nv.${employee.skillLevel} • ${employee.trait}", style = MaterialTheme.typography.bodySmall, color = Color(0xFFBFCBD1))
                 }
                 Text(worker?.activity?.label ?: "Fora da cena", style = MaterialTheme.typography.labelSmall, color = if (worker?.activity == WorkerActivity.PHONE) DangerRed else ProductionGreen)
             }
-            Text("Posto: $machineName • fadiga ${(employee.fatigue * 100).roundToInt().coerceIn(0, 100)}%", style = MaterialTheme.typography.bodySmall)
+            Surface(shape = RoundedCornerShape(10.dp), color = Steel900, border = BorderStroke(1.dp, Steel700.copy(alpha = .5f))) {
+                Text("💬 \"$speech\"", style = MaterialTheme.typography.bodySmall, color = Color.White, modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp))
+            }
+            Text("Posto: $machineName • fadiga ${(employee.fatigue * 100).roundToInt().coerceIn(0, 100)}%", style = MaterialTheme.typography.bodySmall, color = Color.White)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 OutlinedButton(onClick = { store.restEmployee(employee.id) }, modifier = Modifier.weight(1f)) { Text("Enviar à Copa") }
                 OutlinedButton(onClick = { store.assignEmployeeNext(employee.id) }, modifier = Modifier.weight(1f)) { Text("Trocar posto") }
@@ -1210,7 +1168,8 @@ private fun StudioMachineManagementDialog(
     val activeBatch = store.state.career.activeBatch
     val reworkHere = studioStage(activeBatch) == ProductionStage.REWORK && activeBatch?.machineId == machine.id
     val candidates = store.state.employees.sortedWith(
-        compareByDescending<EmployeeSave> { it.specialty == def?.specialty?.name }
+        compareByDescending<EmployeeSave> { store.operatorFitScore(it.id, machine.id) }
+            .thenByDescending { it.specialty == def?.specialty?.name }
             .thenByDescending { it.skillLevel }
     )
     val conditionFactor = .5 + machine.condition.coerceIn(0, 1000) / 2000.0
@@ -1235,8 +1194,8 @@ private fun StudioMachineManagementDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StudioMetricBox("CONSERVAÇÃO", "${machine.condition / 10}%", Modifier.weight(1f))
-                    StudioMetricBox("PÇ / 10 MIN", if (production?.isOperating == true) studioOneDecimal(production.unitsPer10Minutes) else "Parada", Modifier.weight(1f))
+                    StudioMetricBox("⚙ CONSERVAÇÃO", "${machine.condition / 10}%", Modifier.weight(1f))
+                    StudioMetricBox("📈 PÇ / 10 MIN", if (production?.isOperating == true) studioOneDecimal(production.unitsPer10Minutes) else "Parada", Modifier.weight(1f))
                 }
                 Text("Nível ${machine.level} • Especialidade: ${def?.specialty?.name ?: "-"}", style = MaterialTheme.typography.bodySmall)
 
@@ -1249,14 +1208,18 @@ private fun StudioMachineManagementDialog(
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("OPERAR EU MESMO", fontWeight = FontWeight.Black) }
                 }
-                Text("Só o dono executa minigames. Funcionários continuam automáticos.", style = MaterialTheme.typography.bodySmall, color = ElectricBlue)
+                Text("Só o dono executa minigames. Funcionários continuam automáticos, e a equipe pode ser redistribuída pela lista técnica.", style = MaterialTheme.typography.bodySmall, color = ElectricBlue)
 
                 HorizontalDivider()
                 Text("Operador atual: ${operator?.name ?: "Nenhum operador"}", fontWeight = FontWeight.Bold)
                 if (operator != null) {
                     TextButton(onClick = { store.clearMachineOperator(machine.id) }) { Text("Remover operador") }
                 }
-                Text("Trocar / atribuir operador", fontWeight = FontWeight.Bold)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { store.assignBestOperator(machine.id) }, modifier = Modifier.weight(1f)) { Text("Melhor operador") }
+                    OutlinedButton(onClick = { store.autoDistributeOperators() }, modifier = Modifier.weight(1f)) { Text("Auto distribuir") }
+                }
+                Text("Lista técnica • selecione um operador disponível ou o mais experiente", fontWeight = FontWeight.Bold, color = Color.White)
                 if (candidates.isEmpty()) {
                     Text("Contrate funcionários para colocar esta máquina em produção.", style = MaterialTheme.typography.bodySmall)
                 } else {
@@ -1269,8 +1232,8 @@ private fun StudioMachineManagementDialog(
                             border = if (recommended) BorderStroke(1.dp, ElectricBlue.copy(alpha = .38f)) else null,
                         ) {
                             Column(Modifier.padding(10.dp)) {
-                                Text(employee.name, fontWeight = FontWeight.Bold)
-                                Text("${employee.specialty} • Nv.${employee.skillLevel}${if (recommended) " • recomendado" else ""}", style = MaterialTheme.typography.bodySmall, color = Steel400)
+                                Text(employee.name, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text("${employee.specialty} • Nv.${employee.skillLevel} • score ${store.operatorFitScore(employee.id, machine.id)}${if (recommended) " • recomendado" else ""}", style = MaterialTheme.typography.bodySmall, color = Color(0xFFBFCBD1))
                             }
                         }
                     }
@@ -1302,8 +1265,8 @@ private fun StudioMachineManagementDialog(
 private fun StudioMetricBox(label: String, value: String, modifier: Modifier = Modifier) {
     Surface(modifier = modifier, shape = RoundedCornerShape(10.dp), color = Steel950.copy(alpha = .75f)) {
         Column(Modifier.padding(9.dp)) {
-            Text(label, style = MaterialTheme.typography.labelSmall, color = Steel400)
-            Text(value, fontWeight = FontWeight.Black)
+            Text(label, style = MaterialTheme.typography.labelSmall, color = Color(0xFFBFCBD1))
+            Text(value, fontWeight = FontWeight.Black, color = Color.White)
         }
     }
 }
@@ -1563,11 +1526,11 @@ private fun StudioQualityInspectionDialog(store: GameStore, onDismiss: () -> Uni
             }
         },
         confirmButton = {
-            Button(onClick = { store.inspectOwnerBatch(true); GameFeedback.play(GameSoundEffect.QUALITY_PASS, store.state.uiSettings.soundEnabled); GameFeedback.haptic(store.state.uiSettings.hapticsEnabled); onDismiss() }) { Text("APROVAR") }
+            Button(onClick = { store.inspectOwnerBatch(true); onDismiss() }) { Text("APROVAR") }
         },
         dismissButton = {
             Row {
-                OutlinedButton(onClick = { store.inspectOwnerBatch(false); GameFeedback.play(GameSoundEffect.MACHINE_START, store.state.uiSettings.soundEnabled); onDismiss() }) { Text("RETRABALHAR") }
+                OutlinedButton(onClick = { store.inspectOwnerBatch(false); onDismiss() }) { Text("RETRABALHAR") }
                 TextButton(onClick = onDismiss) { Text("Fechar") }
             }
         },

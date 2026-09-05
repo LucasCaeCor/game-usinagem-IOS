@@ -27,8 +27,6 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
-private const val ROULETTE_V27 = "roulette_visual_v27"
-
 private data class RouletteSlice(
     val label: String,
     val glyph: String,
@@ -43,7 +41,7 @@ private val rouletteSlices = listOf(
     RouletteSlice("Épico", "✦", RoyalPurple),
     RouletteSlice("Máquina", "⚙", SafetyAmberSoft),
     RouletteSlice("Ferramenta", "◆", ElectricBlue),
-    RouletteSlice("Equipe lendária", "♛", Color(0xFFFFC857)),
+    RouletteSlice("Lendário", "✶", Color(0xFFFFC857)),
 )
 
 @Composable
@@ -84,7 +82,7 @@ fun IndustrialRouletteScreen(store: GameStore) {
             ElevatedCard(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(26.dp),
-                colors = CardDefaults.elevatedCardColors(containerColor = Steel900, contentColor = Steel100),
+                colors = CardDefaults.elevatedCardColors(containerColor = Steel900),
             ) {
                 Box(
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -113,19 +111,15 @@ fun IndustrialRouletteScreen(store: GameStore) {
                         rotate(rotation.value, pivot = center) {
                             rouletteSlices.forEachIndexed { index, slice ->
                                 drawArc(
-                                    color = slice.color.copy(alpha = if (index % 2 == 0) .92f else .74f),
+                                    color = slice.color.copy(
+                                        alpha = if (index % 2 == 0) .92f else .74f
+                                    ),
                                     startAngle = -90f + index * sweep,
                                     sweepAngle = sweep - .8f,
                                     useCenter = true,
                                     topLeft = topLeft,
                                     size = wheelSize,
                                 )
-                                val angle = (-90.0 + index * sweep.toDouble() + sweep / 2.0) * (PI / 180.0)
-                                val iconCenter = Offset(
-                                    center.x + cos(angle).toFloat() * d * .315f,
-                                    center.y + sin(angle).toFloat() * d * .315f,
-                                )
-                                drawRouletteGlyphV27(index, iconCenter, d * .050f, Color.White.copy(alpha=.94f))
                             }
 
                             repeat(rouletteSlices.size) { index ->
@@ -173,16 +167,30 @@ fun IndustrialRouletteScreen(store: GameStore) {
         }
 
         item {
-            Column(verticalArrangement=Arrangement.spacedBy(6.dp)) {
-                rouletteSlices.chunked(4).forEach { row ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-                        row.forEach { slice ->
-                            Surface(modifier=Modifier.weight(1f),shape=RoundedCornerShape(12.dp),color=slice.color.copy(alpha=.12f),border=androidx.compose.foundation.BorderStroke(1.dp,slice.color.copy(alpha=.24f))) {
-                                Column(Modifier.padding(vertical=8.dp,horizontal=3.dp),horizontalAlignment=Alignment.CenterHorizontally) {
-                                    Text(slice.glyph,fontWeight=FontWeight.Black,color=slice.color)
-                                    Text(slice.label,style=MaterialTheme.typography.labelSmall,maxLines=2,color=Steel100)
-                                }
-                            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                rouletteSlices.take(4).forEach { slice ->
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        color = slice.color.copy(alpha = .12f),
+                    ) {
+                        Column(
+                            Modifier.padding(vertical = 9.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(
+                                slice.glyph,
+                                fontWeight = FontWeight.Black,
+                                color = slice.color,
+                            )
+                            Text(
+                                slice.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                            )
                         }
                     }
                 }
@@ -212,8 +220,6 @@ fun IndustrialRouletteScreen(store: GameStore) {
                     if (!spinning && store.state.expansion.gachaTickets > 0) {
                         scope.launch {
                             spinning = true
-                            GameFeedback.play(GameSoundEffect.MACHINE_START, store.state.uiSettings.soundEnabled)
-                            GameFeedback.haptic(store.state.uiSettings.hapticsEnabled)
                             val reward = store.spinGacha()
                             if (reward == null) {
                                 spinning = false
@@ -235,8 +241,6 @@ fun IndustrialRouletteScreen(store: GameStore) {
                                     easing = FastOutSlowInEasing,
                                 ),
                             )
-                            GameFeedback.play(GameSoundEffect.REWARD, store.state.uiSettings.soundEnabled)
-                            GameFeedback.haptic(store.state.uiSettings.hapticsEnabled)
                             spinning = false
                         }
                     }
@@ -253,11 +257,11 @@ fun IndustrialRouletteScreen(store: GameStore) {
 
         item {
             OutlinedButton(
-                onClick = { store.claimDailyGachaTicket(); GameFeedback.play(GameSoundEffect.REWARD, store.state.uiSettings.soundEnabled) },
-                enabled = !spinning && store.dailyTicketRemainingMillis == 0L,
+                onClick = store::claimDailyGachaTicket,
+                enabled = !spinning,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(if (store.dailyTicketRemainingMillis == 0L) "🎟 COLETAR FICHA DIÁRIA" else "🎟 PRÓXIMA EM ${formatV27Duration(store.dailyTicketRemainingMillis)}")
+                Text("Coletar ficha diária")
             }
         }
 
@@ -272,21 +276,7 @@ fun IndustrialRouletteScreen(store: GameStore) {
     }
 }
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawRouletteGlyphV27(index:Int, at:Offset, r:Float, color:Color) {
-    val sw=(r*.22f).coerceAtLeast(1.5f)
-    when(index) {
-        0,6 -> { drawCircle(color,r*.62f,at,style=androidx.compose.ui.graphics.drawscope.Stroke(sw)); drawLine(color,at+Offset(-r*.7f,0f),at+Offset(r*.7f,0f),sw); drawLine(color,at+Offset(0f,-r*.7f),at+Offset(0f,r*.7f),sw) }
-        1 -> { val p=Path().apply{moveTo(at.x,at.y-r);lineTo(at.x+r*.28f,at.y-r*.26f);lineTo(at.x+r,at.y-r*.22f);lineTo(at.x+r*.42f,at.y+r*.22f);lineTo(at.x+r*.60f,at.y+r);lineTo(at.x,at.y+r*.52f);lineTo(at.x-r*.60f,at.y+r);lineTo(at.x-r*.42f,at.y+r*.22f);lineTo(at.x-r,at.y-r*.22f);lineTo(at.x-r*.28f,at.y-r*.26f);close()};drawPath(p,color) }
-        2 -> { drawCircle(color,r*.42f,at+Offset(0f,-r*.42f)); drawArc(color,190f,160f,false,Offset(at.x-r*.78f,at.y-r*.05f),Size(r*1.56f,r*1.30f),style=androidx.compose.ui.graphics.drawscope.Stroke(sw)) }
-        3 -> { val p=Path().apply{moveTo(at.x,at.y-r);lineTo(at.x+r,at.y);lineTo(at.x,at.y+r);lineTo(at.x-r,at.y);close()};drawPath(p,color,style=androidx.compose.ui.graphics.drawscope.Stroke(sw)) }
-        4 -> { drawCircle(color,r*.68f,at,style=androidx.compose.ui.graphics.drawscope.Stroke(sw));drawCircle(color,r*.18f,at);repeat(4){i->val a=i*1.5708;drawLine(color,at+Offset((kotlin.math.cos(a)*r*.72f).toFloat(),(kotlin.math.sin(a)*r*.72f).toFloat()),at+Offset((kotlin.math.cos(a)*r).toFloat(),(kotlin.math.sin(a)*r).toFloat()),sw)} }
-        5 -> { drawRoundRect(color.copy(alpha=.18f),at-Offset(r,r*.65f),Size(r*2f,r*1.3f),androidx.compose.ui.geometry.CornerRadius(r*.2f));drawRoundRect(color,at-Offset(r,r*.65f),Size(r*2f,r*1.3f),androidx.compose.ui.geometry.CornerRadius(r*.2f),style=androidx.compose.ui.graphics.drawscope.Stroke(sw));drawCircle(color,r*.16f,at+Offset(r*.55f,0f)) }
-        else -> { val p=Path().apply{moveTo(at.x-r*.85f,at.y+r*.70f);lineTo(at.x-r*.55f,at.y-r*.60f);lineTo(at.x,at.y-r*.15f);lineTo(at.x+r*.55f,at.y-r*.60f);lineTo(at.x+r*.85f,at.y+r*.70f);close()};drawPath(p,color);drawCircle(Color(0xFFFFC857),r*.18f,at+Offset(0f,r*.15f)) }
-    }
-}
-
 private fun rouletteTargetIndex(reward: GachaRewardDef): Int = when {
-    reward.type == "legendary_employee" -> 7
     reward.rarity == RarityDef.LEGENDARY -> 7
     reward.rarity == RarityDef.EPIC -> 4
     reward.type.contains("PREMIUM", ignoreCase = true) || reward.type.contains("MACHINE", ignoreCase = true) -> 5
@@ -306,7 +296,7 @@ private fun RouletteHero(
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = Steel850, contentColor = Steel100),
+        colors = CardDefaults.elevatedCardColors(containerColor = Steel850),
     ) {
         Column(
             Modifier.fillMaxWidth().padding(16.dp),
@@ -342,7 +332,7 @@ private fun RouletteCard(
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = Steel900, contentColor = Steel100),
+        colors = CardDefaults.elevatedCardColors(containerColor = Steel900),
     ) {
         Column(
             Modifier.fillMaxWidth().padding(14.dp),
